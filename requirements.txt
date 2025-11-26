@@ -1,0 +1,8 @@
+numpy
+Pillow
+imageio
+torch
+phiflow
+matplotlib
+h5py
+scipy
