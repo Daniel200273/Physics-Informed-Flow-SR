@@ -1,0 +1,3 @@
+gitignore
+# Ignore data files
+data/*.npy
