@@ -6,3 +6,4 @@ phiflow
 matplotlib
 h5py
 scipy
+phi
