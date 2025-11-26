@@ -1,8 +1,5 @@
-<<<<<<< HEAD
 #venv:
 PIFsr/
-=======
 gitignore
 # Ignore data files
 data/*.npy
->>>>>>> ab6022d5dd7eec123400f42ca225a6879afd651f
