@@ -10,7 +10,7 @@ try:
     print(f"High Res Shape: {hr_data.shape}")
     print(f"Low Res Shape:  {lr_data.shape}")
 except FileNotFoundError:
-    print("❌ Error: Data not found. Run playground.py first!")
+    print("❌ Error: Data not found. Run generate.py first!")
     exit()
 
 # 2. Helper to convert Velocity (x,y) -> Speed (Scalar)
