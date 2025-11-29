@@ -99,9 +99,9 @@ for sim_idx, param in enumerate(SIMULATION_PARAMS):
 
     # Initialize STRONGER inflows
     combined_smoke_inflow = CenteredGrid(
-        0, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS)
+        0, extrapolation.ZERO, x=H, y=W, bounds=BOUNDS)
     combined_vel_inflow = StaggeredGrid(
-        0, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS)
+        0, extrapolation.ZERO, x=H, y=W, bounds=BOUNDS)
 
     # Generate num_flows POWERFUL emitters
     for flow_idx in range(param['num_flows']):
@@ -116,9 +116,9 @@ for sim_idx, param in enumerate(SIMULATION_PARAMS):
             [px, py], channel(vector="x,y")), radius=6)  # Bigger!
 
         mask_smoke = CenteredGrid(
-            sphere, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS)
+            sphere, extrapolation.ZERO, x=H, y=W, bounds=BOUNDS)
         mask_vel = StaggeredGrid(
-            sphere, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS)
+            sphere, extrapolation.ZERO, x=H, y=W, bounds=BOUNDS)
 
         # MUCH stronger!
         combined_smoke_inflow += (mask_smoke * param['strength'])
@@ -131,9 +131,9 @@ for sim_idx, param in enumerate(SIMULATION_PARAMS):
         combined_vel_inflow += mask_vel * dir_vec
 
     # Reset simulation
-    velocity = StaggeredGrid(0, extrapolation.BOUNDARY,
+    velocity = StaggeredGrid(0, extrapolation.ZERO,
                              x=H, y=W, bounds=BOUNDS)
-    smoke = CenteredGrid(0, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS)
+    smoke = CenteredGrid(0, extrapolation.ZERO, x=H, y=W, bounds=BOUNDS)
     pressure = None
 
     # PULSING time step for dynamic flows
