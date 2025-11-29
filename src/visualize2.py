@@ -5,8 +5,8 @@ import matplotlib.animation as animation
 # 1. Load the Data
 try:
     # Note: Filenames changed to match your new generation script
-    hr_dataset = np.load('../data/dataset_hr.npy') # Shape: (Sims, Frames, 128, 128, 2)
-    lr_dataset = np.load('../data/dataset_lr.npy') # Shape: (Sims, Frames, 32, 32, 2)
+    hr_dataset = np.load('../data/train_hr.npy') # Shape: (Sims, Frames, 128, 128, 2)
+    lr_dataset = np.load('../data/train_lr.npy') # Shape: (Sims, Frames, 32, 32, 2)
     
     print(f"✅ Data Loaded.")
     print(f"Dataset Shape (HR): {hr_dataset.shape}") # e.g., (10, 100, 128, 128, 2)

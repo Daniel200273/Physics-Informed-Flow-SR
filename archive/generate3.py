@@ -15,15 +15,59 @@ DATA_DIR = "../data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # NEW: 20 SIMULATIONS × 200 FRAMES = 4,000 FRAMES TOTAL
-NUM_SIMULATIONS = 1
+NUM_SIMULATIONS = 20
 FRAMES_PER_SIM = 200
 
 # --- 20 DIVERSE SIMULATION CONFIGURATIONS ---
 SIMULATION_PARAMS = [
+    # 1-5: Smoke Plumes (different positions/strengths)
+    {"name": "smoke_bottom_left", "center": [
+        32, 12], "strength": 0.20, "num_flows": 1},
+    {"name": "smoke_bottom_center", "center": [
+        64, 12], "strength": 0.22, "num_flows": 1},
+    {"name": "smoke_bottom_right", "center": [
+        96, 12], "strength": 0.18, "num_flows": 1},
+    {"name": "strong_plume", "center": [
+        50, 10], "strength": 0.40, "num_flows": 1},
+    {"name": "weak_plume", "center": [40, 15],
+        "strength": 0.10, "num_flows": 1},
+
+    # 6-10: Vortex & Channel Flows
+    {"name": "central_vortex", "center": [
+        64, 64], "strength": 0.15, "num_flows": 1},
+    {"name": "channel_left", "center": [
+        20, 64], "strength": 0.25, "num_flows": 1},
+    {"name": "channel_right", "center": [
+        108, 64], "strength": 0.25, "num_flows": 1},
+    {"name": "top_down_jet", "center": [
+        64, 20], "strength": 0.30, "num_flows": 1},
+    {"name": "corner_swirl", "center": [
+        20, 20], "strength": 0.18, "num_flows": 1},
+
+    # 11-15: Multi-flow collisions (2-3 inflows)
+    {"name": "double_plume", "center": [
+        32, 12], "strength": 0.15, "num_flows": 2},
+    {"name": "triple_collision", "center": [
+        64, 64], "strength": 0.12, "num_flows": 3},
+    {"name": "side_jets", "center": [20, 40],
+        "strength": 0.18, "num_flows": 2},
+    {"name": "crossing_flows", "center": [
+        40, 40], "strength": 0.20, "num_flows": 2},
+    {"name": "opposing_jets", "center": [
+        30, 64], "strength": 0.22, "num_flows": 2},
+
+    # 16-20: Advanced variations
+    {"name": "wide_sheet", "center": [64, 12],
+        "strength": 0.12, "num_flows": 1},
+    {"name": "high_buoyancy", "center": [
+        50, 50], "strength": 0.25, "num_flows": 1},
+    {"name": "pulsing_jet", "center": [
+        64, 12], "strength": 0.20, "num_flows": 1},
     {"name": "bottom_right_swirl", "center": [
         96, 20], "strength": 0.16, "num_flows": 1},
     {"name": "complex_multi", "center": [
-        50, 50], "strength": 0.15, "num_flows": 3},
+        50, 50], "strength": 0.15, "num_flows": 3}
+
 ]
 
 # --- JIT COMPILED STEP FUNCTION (unchanged) ---
@@ -138,46 +182,3 @@ print(f"Train: {3200} | Val: {400} | Test: {400}")
 print(f"Files saved in {DATA_DIR}/")
 print("Run visualize.py to check results!")
 
-''' # 1-5: Smoke Plumes (different positions/strengths)
-    {"name": "smoke_bottom_left", "center": [
-        32, 12], "strength": 0.20, "num_flows": 1},
-    {"name": "smoke_bottom_center", "center": [
-        64, 12], "strength": 0.22, "num_flows": 1},
-    {"name": "smoke_bottom_right", "center": [
-        96, 12], "strength": 0.18, "num_flows": 1},
-    {"name": "strong_plume", "center": [
-        50, 10], "strength": 0.40, "num_flows": 1},
-    {"name": "weak_plume", "center": [40, 15],
-        "strength": 0.10, "num_flows": 1},
-
-    # 6-10: Vortex & Channel Flows
-    {"name": "central_vortex", "center": [
-        64, 64], "strength": 0.15, "num_flows": 1},
-    {"name": "channel_left", "center": [
-        20, 64], "strength": 0.25, "num_flows": 1},
-    {"name": "channel_right", "center": [
-        108, 64], "strength": 0.25, "num_flows": 1},
-    {"name": "top_down_jet", "center": [
-        64, 20], "strength": 0.30, "num_flows": 1},
-    {"name": "corner_swirl", "center": [
-        20, 20], "strength": 0.18, "num_flows": 1},
-
-    # 11-15: Multi-flow collisions (2-3 inflows)
-    {"name": "double_plume", "center": [
-        32, 12], "strength": 0.15, "num_flows": 2},
-    {"name": "triple_collision", "center": [
-        64, 64], "strength": 0.12, "num_flows": 3},
-    {"name": "side_jets", "center": [20, 40],
-        "strength": 0.18, "num_flows": 2},
-    {"name": "crossing_flows", "center": [
-        40, 40], "strength": 0.20, "num_flows": 2},
-    {"name": "opposing_jets", "center": [
-        30, 64], "strength": 0.22, "num_flows": 2},
-
-    # 16-20: Advanced variations
-    {"name": "wide_sheet", "center": [64, 12],
-        "strength": 0.12, "num_flows": 1},
-    {"name": "high_buoyancy", "center": [
-        50, 50], "strength": 0.25, "num_flows": 1},
-    {"name": "pulsing_jet", "center": [
-        64, 12], "strength": 0.20, "num_flows": 1},'''
