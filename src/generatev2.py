@@ -18,9 +18,9 @@ BOUNDS = Box(x=100, y=100)
 DATA_DIR = "./data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# 20 SIMULATIONS × 300 FRAMES = 6,000 FRAMES TOTAL
+# 20 SIMULATIONS × 200 FRAMES = 4,000 FRAMES TOTAL
 NUM_SIMULATIONS = 20
-FRAMES_PER_SIM = 300        # Increased frames per simulation
+FRAMES_PER_SIM = 200        # Increased frames per simulation
 
 # --- 20 DIVERSE SIMULATION CONFIGURATIONS (unchanged) ---
 SIMULATION_PARAMS = [
