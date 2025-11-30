@@ -75,9 +75,12 @@ SIMULATION_PARAMS = [
 
 @math.jit_compile
 def step_function(s, v, p, dt, inflow_s, inflow_v):
+    # Convert centered velocity inflow to staggered grid format
+    inflow_v_staggered = v.with_values(inflow_v.values)
+
     # 1. Advection
     s = advect.semi_lagrangian(s, v, dt) + inflow_s
-    v = advect.semi_lagrangian(v, v, dt) + inflow_v
+    v = advect.semi_lagrangian(v, v, dt) + inflow_v_staggered
 
     # 2. Buoyancy (Corrected Boussinesq term: s * g_vector)
     g_vector = math.tensor([0.0, 0.5], channel(vector='x,y'))
@@ -106,7 +109,7 @@ for sim_idx, param in enumerate(SIMULATION_PARAMS):
 
     combined_smoke_inflow = CenteredGrid(
         0, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS)
-    combined_vel_inflow = StaggeredGrid(
+    combined_vel_inflow = CenteredGrid(
         0, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS)
 
     for flow_idx in range(param['num_flows']):
@@ -120,7 +123,7 @@ for sim_idx, param in enumerate(SIMULATION_PARAMS):
             [px, py], channel(vector="x,y")), radius=4)
         mask_smoke = CenteredGrid(
             sphere, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS)
-        mask_vel = StaggeredGrid(
+        mask_vel = CenteredGrid(
             sphere, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS)
 
         combined_smoke_inflow += (mask_smoke * param['strength'])

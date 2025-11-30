@@ -3,3 +3,6 @@ PIFsr/
 gitignore
 # Ignore data files
 data/*.npy
+
+__pycache__/
+*.pyc
