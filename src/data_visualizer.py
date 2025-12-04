@@ -1,132 +1,147 @@
+import argparse
+import glob
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-import os
-import glob
 
-# --- CONFIG ---
-DATA_DIR = "../data"
-FPS = 30
-PAUSE_BETWEEN_SIMS = 1.0  # Seconds to pause before next sim starts
-
-def get_speed(velocity_field):
+def calculate_magnitude(velocity_field):
     """
-    Input shape: (2, H, W)  <- Channels first
-    Output shape: (H, W)
+    Computes the magnitude of the velocity vectors.
+    Input shape: (Frames, Height, Width, 2)
+    Output shape: (Frames, Height, Width)
     """
-    u = velocity_field[0]
-    v = velocity_field[1]
-    return np.sqrt(u**2 + v**2)
+    # u_x is index 0, u_y is index 1
+    u_x = velocity_field[..., 0]
+    u_y = velocity_field[..., 1]
+    return np.sqrt(u_x**2 + u_y**2)
 
-class SimulationPlayer:
-    def __init__(self, hr_files):
-        self.hr_files = hr_files
-        self.current_sim_idx = 0
-        self.current_frame = 0
-        
-        # Setup Figure once
-        self.fig, (self.ax1, self.ax2) = plt.subplots(1, 2, figsize=(12, 6))
-        self.im_lr = None
-        self.im_hr = None
-        self.title_text = self.fig.suptitle("Initializing...", fontsize=16)
-        
-        # Load first simulation to initialize plots
-        self.load_simulation(0)
-        
-        # Create Colorbar (shared)
-        self.cbar = self.fig.colorbar(self.im_hr, ax=[self.ax1, self.ax2], 
-                                      orientation='horizontal', fraction=0.05, pad=0.05)
-        self.cbar.set_label('Velocity Magnitude')
+def play_simulation(file_path, save_gif=False, auto_advance=True):
+    """
+    Loads an NPZ file and animates the HR and LR side-by-side.
+    """
+    print(f"Loading {file_path}...")
+    
+    try:
+        with np.load(file_path) as data:
+            if 'hr' not in data or 'lr' not in data:
+                print(f"Skipping {file_path}: Keys 'hr' and 'lr' not found.")
+                return
 
-    def load_simulation(self, idx):
-        if idx >= len(self.hr_files):
-            print("All simulations played. Looping back to start.")
-            self.current_sim_idx = 0
-            idx = 0
-
-        hr_path = self.hr_files[idx]
-        lr_path = hr_path.replace("_hr.npy", "_lr.npy")
-        
-        if not os.path.exists(lr_path):
-            print(f"Skipping {hr_path} (Missing LR file)")
-            self.current_sim_idx += 1
-            self.load_simulation(self.current_sim_idx)
-            return
-
-        sim_name = os.path.basename(hr_path).replace("_hr.npy", "")
-        print(f"Loading Sim {idx + 1}/{len(self.hr_files)}: {sim_name}")
-
-        # Load Data
-        self.hr_data = np.load(hr_path)
-        self.lr_data = np.load(lr_path)
-        self.total_frames = self.hr_data.shape[0]
-        self.current_frame = 0
-        self.sim_name = sim_name
-
-        # Calculate Max Speed for Normalization
-        flat_mag = np.sqrt(self.hr_data[:, 0]**2 + self.hr_data[:, 1]**2)
-        max_speed = np.percentile(flat_mag, 99)
-
-        # Initialize or Update Images
-        speed_lr = get_speed(self.lr_data[0])
-        speed_hr = get_speed(self.hr_data[0])
-
-        if self.im_lr is None:
-            # First run initialization
-            self.im_lr = self.ax1.imshow(speed_lr, cmap='inferno', origin='lower', vmin=0, vmax=max_speed)
-            self.im_hr = self.ax2.imshow(speed_hr, cmap='inferno', origin='lower', vmin=0, vmax=max_speed)
-            self.ax1.set_title(f"Input Low Res ({self.lr_data.shape[2]}x{self.lr_data.shape[3]})")
-            self.ax2.set_title(f"Target High Res ({self.hr_data.shape[2]}x{self.hr_data.shape[3]})")
-        else:
-            # Update existing plot settings for new data limits
-            self.im_lr.set_clim(0, max_speed)
-            self.im_hr.set_clim(0, max_speed)
-            self.im_lr.set_data(speed_lr)
-            self.im_hr.set_data(speed_hr)
+            hr_seq = data['hr']
+            lr_seq = data['lr']
             
-        self.title_text.set_text(f'Simulation: {self.sim_name}')
+    except Exception as e:
+        print(f"Error reading {file_path}: {e}")
+        return
 
-    def update(self, frame):
-        # Check if we reached end of current sim
-        if self.current_frame >= self.total_frames:
-            # Move to next simulation
-            self.current_sim_idx += 1
-            self.load_simulation(self.current_sim_idx)
-            # Add a small pause visually (optional, effectively frames repeating 0)
-            return self.im_lr, self.im_hr, self.title_text
+    # Check dimensions
+    frames = hr_seq.shape[0]
+    print(f"  Data found: {frames} frames.")
+    
+    # Compute Magnitude
+    hr_mag = calculate_magnitude(hr_seq)
+    lr_mag = calculate_magnitude(lr_seq)
 
-        # Get Data for current frame
-        s_lr = get_speed(self.lr_data[self.current_frame])
-        s_hr = get_speed(self.hr_data[self.current_frame])
-        
-        # Update Visuals
-        self.im_lr.set_data(s_lr)
-        self.im_hr.set_data(s_hr)
-        
-        self.ax1.set_xlabel(f"Frame {self.current_frame}/{self.total_frames}")
-        
-        self.current_frame += 1
-        return self.im_lr, self.im_hr, self.title_text
+    # Determine Color Scale
+    valid_max = max(np.max(hr_mag), np.max(lr_mag))
+    if valid_max == 0: valid_max = 1.0 
+    
+    vmin = 0
+    vmax = valid_max
+
+    # --- Setup Plot ---
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+    fig.canvas.manager.set_window_title(f"Visualizing: {os.path.basename(file_path)}")
+
+    # High Res Plot
+    img_hr = ax1.imshow(hr_mag[0], cmap='inferno', vmin=vmin, vmax=vmax, origin='lower')
+    ax1.set_title(f"High Res ({hr_seq.shape[1]}x{hr_seq.shape[2]})")
+    ax1.axis('off')
+
+    # Low Res Plot
+    img_lr = ax2.imshow(lr_mag[0], cmap='inferno', vmin=vmin, vmax=vmax, origin='lower', interpolation='nearest')
+    ax2.set_title(f"Low Res ({lr_seq.shape[1]}x{lr_seq.shape[2]})")
+    ax2.axis('off')
+
+    # Add Frame Counter
+    time_text = ax1.text(0.02, 0.95, '', transform=ax1.transAxes, color='white', 
+                         fontsize=12, fontweight='bold')
+
+    def update(frame):
+        img_hr.set_data(hr_mag[frame])
+        img_lr.set_data(lr_mag[frame])
+        time_text.set_text(f"Frame: {frame}/{frames}")
+        return img_hr, img_lr, time_text
+
+    # Animation Settings
+    interval_ms = 50
+    
+    # If auto-advancing, don't loop the video (repeat=False) so it ends cleanly
+    should_loop = not auto_advance
+    
+    ani = animation.FuncAnimation(
+        fig, update, frames=frames, interval=interval_ms, blit=True, repeat=should_loop
+    )
+
+    if save_gif:
+        out_name = file_path.replace('.npz', '.gif')
+        print(f"  Saving animation to {out_name}...")
+        ani.save(out_name, writer='pillow', fps=20)
+        print("  Done.")
+        plt.close(fig)
+    else:
+        if auto_advance:
+            # Calculate duration in seconds + a small buffer (1.0s)
+            duration = (frames * interval_ms / 1000.0) + 1.0
+            print(f"  Playing for {duration:.1f} seconds...")
+            
+            # Non-blocking show
+            plt.show(block=False)
+            
+            # Pause allows the GUI event loop to run for 'duration' seconds
+            try:
+                plt.pause(duration)
+            except Exception:
+                pass # Handle case where user closes window manually during playback
+            
+            # Close the window to allow the main loop to proceed
+            plt.close(fig)
+        else:
+            print("  Displaying... (Close window to continue to next file)")
+            plt.show()
+
+def main():
+    parser = argparse.ArgumentParser(description="Visualize fluid simulation .npz files.")
+    parser.add_argument('path', nargs='?', default='../data', 
+                        help="Path to a directory containing .npz files or a specific .npz file.")
+    parser.add_argument('--save', action='store_true', 
+                        help="Save the animation as a .gif file instead of showing it.")
+    parser.add_argument('--manual', action='store_true',
+                        help="Disable auto-advance. Wait for user to close window before playing next file.")
+    
+    args = parser.parse_args()
+
+    # Determine files to process
+    files = []
+    if os.path.isfile(args.path):
+        files = [args.path]
+    elif os.path.isdir(args.path):
+        files = sorted(glob.glob(os.path.join(args.path, "*.npz")))
+    else:
+        files = sorted(glob.glob(args.path))
+
+    if not files:
+        print(f"No .npz files found in {args.path}")
+        return
+
+    print(f"Found {len(files)} files.")
+    
+    # Default is auto-advance unless --manual is passed
+    auto_advance = not args.manual
+    
+    for f in files:
+        play_simulation(f, save_gif=args.save, auto_advance=auto_advance)
 
 if __name__ == "__main__":
-    # Get list of files
-    hr_files = sorted(glob.glob(os.path.join(DATA_DIR, "*_hr.npy")))
-    
-    if not hr_files:
-        print(f"No data found in {DATA_DIR}. Run data_generator.py first.")
-        exit()
-
-    print(f"Found {len(hr_files)} simulations. Starting auto-play...")
-    
-    # Initialize Player Class
-    player = SimulationPlayer(hr_files)
-    
-    # We use a generator or simple infinite Frames because the player manages the index internally
-    ani = animation.FuncAnimation(
-        player.fig, 
-        player.update, 
-        interval=1000/FPS, 
-        save_count=200 # Needed only if saving
-    )
-    
-    plt.show()
+    main()

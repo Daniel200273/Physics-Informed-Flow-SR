@@ -1,157 +1,175 @@
-from phi.torch.flow import *
-import numpy as np
 import os
+import numpy as np
 import warnings
-import random
-import torch
-import torch.nn.functional as F
+from phi.flow import *
 
-# --- 1. CONFIGURATION ---
-warnings.filterwarnings('ignore')
-math.set_global_precision(32)
+warnings.filterwarnings("ignore", module="phiml.math._optimize")
 
-H, W = 256, 256     # High Res Target
-DS_FACTOR = 8       # 256 / 8 = 32 (Low Res Input)
-FRAMES = 200        # Frames per sim
-DT = 0.2            # Time step
-BOUNDS = Box(x=100, y=100)
+# --- Configuration ---
+N_SIMS = 40
+FRAMES = 150
+HR_RES = 256
+LR_RES = 32
+SCALE_FACTOR = HR_RES // LR_RES
+DOMAIN_SIZE = 100
+DT_FRAME = 0.8
 
-DATA_DIR = "../data"
-os.makedirs(DATA_DIR, exist_ok=True)
+OUTPUT_DIR = '../data'
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# --- 2. PHYSICS ENGINE (Simple & Stable) ---
-@math.jit_compile
-def step_function(s, v, p, dt, inflow_s, inflow_v):
-    # 1. Advection
-    s = advect.semi_lagrangian(s, v, dt) + inflow_s
-    v = advect.semi_lagrangian(v, v, dt) + inflow_v 
+def get_velocity_vector(magnitude, angle_deg):
+    """Calculates (u, v) vector from magnitude and angle in degrees."""
+    angle_rad = np.radians(angle_deg)
+    u = magnitude * np.cos(angle_rad)
+    v = magnitude * np.sin(angle_rad)
+    return (u, v)
 
-    # 2. Buoyancy
-    # I lowered this from 0.5 to 0.1 so horizontal jets fly straight
-    # instead of immediately curving up.
-    buoyancy_force = s * (0, 0.1) @ v
-    v = v + buoyancy_force
-
-    # 3. Pressure Solve
-    solver = math.Solve('CG', abs_tol=1e-3, rel_tol=1e-3, max_iterations=1000, x0=p)
-    v, p = fluid.make_incompressible(v, solve=solver)
+def run_simulation(sim_id):
+    """
+    Sets up and runs a single fluid simulation scenario.
+    """
     
-    return s, v, p
-
-# --- 3. DYNAMIC SCENARIO GENERATOR ---
-
-def get_inflow_for_frame(sim_idx, t):
-    # Init Empty Grids
-    inflow_s = CenteredGrid(0, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS)
-    inflow_v = StaggeredGrid(0, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS)
+    scenario = np.random.choice(['plume', 'obstacle', 'jet', 'collision'])
+    print(f"--- Generating Sim {sim_id+1}/{N_SIMS} [{scenario}] ---")
     
-    # --- GROUP 1: SIMPLE PLUMES (Sim 0-4) ---
-    # Classic "Smoke rising from a chimney"
-    if 0 <= sim_idx < 5:
-        # Vary X position slightly per sim so they aren't identical
-        cx = 50 + (sim_idx * 10) 
-        sphere = Sphere(center=tensor([cx, 15], channel(vector="x,y")), radius=8)
-        
-        inflow_s = CenteredGrid(sphere, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS) * 0.5
-        inflow_v = StaggeredGrid(sphere, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS) * (0, 2.5)
-
-    # --- GROUP 2: PERPENDICULAR COLLISIONS (Sim 5-9) ---
-    # One jet Right, One jet Up -> Crash in center
-    elif 5 <= sim_idx < 10:
-        # Jet 1: Left side, firing Right
-        s1 = Sphere(center=tensor([20, 50], channel(vector="x,y")), radius=6)
-        v1 = StaggeredGrid(s1, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS) * (3.0, 0)
-        
-        # Jet 2: Bottom side, firing Up
-        s2 = Sphere(center=tensor([50, 20], channel(vector="x,y")), radius=6)
-        v2 = StaggeredGrid(s2, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS) * (0, 3.0)
-        
-        inflow_s = (CenteredGrid(s1, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS) + 
-                    CenteredGrid(s2, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS)) * 0.4
-        inflow_v = v1 + v2
-
-    # --- GROUP 3: VARIABLE SPINNERS (Sim 10-14) ---
-    # Spinning nozzle with DIFFERENT SIZES
-    elif 10 <= sim_idx < 15:
-        # Rotation Logic
-        angle = t * 0.15
-        vx = np.cos(angle) * 3.0
-        vy = np.sin(angle) * 3.0
-        
-        # DIFFERENT SIZE logic:
-        # Sim 10=Small(4), Sim 14=Large(12)
-        r = 4 + (sim_idx - 10) * 2 
-        
-        sphere = Sphere(center=tensor([50, 50], channel(vector="x,y")), radius=r)
-        
-        inflow_s = CenteredGrid(sphere, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS) * 0.5
-        inflow_v = StaggeredGrid(sphere, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS) * (vx, vy)
-
-    # --- GROUP 4: MOVING SOURCES (Sim 15-19) ---
-    # Source moves Left <-> Right
-    else:
-        # Ping-pong movement
-        # Moves from x=20 to x=80
-        curr_x = 20 + abs((t % 100) - 50) * 1.2
-        
-        sphere = Sphere(center=tensor([curr_x, 30], channel(vector="x,y")), radius=6)
-        
-        inflow_s = CenteredGrid(sphere, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS) * 0.5
-        inflow_v = StaggeredGrid(sphere, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS) * (0, 2.0)
-
-    return inflow_s, inflow_v
-
-
-# --- 4. MAIN LOOP ---
-print(f"🚀 Starting Generation (256x256, 200 Frames)")
-global_max_val = 0.0
-
-for sim_idx in range(20):
+    # 1. Domain & Grid Setup (Closed Boundaries)
+    v = StaggeredGrid(0, extrapolation.BOUNDARY, x=HR_RES, y=HR_RES, bounds=Box(x=DOMAIN_SIZE, y=DOMAIN_SIZE))
+    s = CenteredGrid(0, extrapolation.ZERO, x=HR_RES, y=HR_RES, bounds=Box(x=DOMAIN_SIZE, y=DOMAIN_SIZE))
+    p = CenteredGrid(0, extrapolation.ZERO, x=HR_RES, y=HR_RES, bounds=Box(x=DOMAIN_SIZE, y=DOMAIN_SIZE))
     
-    # Label for filename
-    if sim_idx < 5: name = "simple_plume"
-    elif sim_idx < 10: name = "perp_collision"
-    elif sim_idx < 15: name = "spinner"
-    else: name = "mover"
+    # 2. Pulse Injection Logic
+    min_inj = int(FRAMES * 0.50)
+    max_inj = int(FRAMES * 0.70)
+    injection_cutoff = np.random.randint(min_inj, max_inj)
+    print(f"   > Injection stops at frame {injection_cutoff}")
+
+    # 3. Physics Initialization
+    buoy_y = np.random.uniform(0.2, 0.5) 
+    buoy_x = np.random.uniform(-0.1, 0.1) 
+    buoyancy_factor = (buoy_x, buoy_y)
+
+    # We store emitter configs in a list to iterate over them
+    # {'mask': Grid, 'velocity': (u, v)}
+    emitters = []
+    obstacle_geo = None
     
-    filename = f"sim_{sim_idx:02d}_{name}"
-    print(f"Processing {filename}...", end="", flush=True)
-    
-    # Reset
-    velocity = StaggeredGrid(0, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS)
-    smoke    = CenteredGrid(0, extrapolation.BOUNDARY, x=H, y=W, bounds=BOUNDS)
-    pressure = None
-    
+    if scenario == 'plume':
+        geo = Sphere(x=np.random.uniform(35, 65), y=10, radius=6)
+        mask = CenteredGrid(geo, extrapolation.BOUNDARY, x=HR_RES, y=HR_RES, bounds=v.bounds)
+        angle = np.random.uniform(50, 130)
+        vel = get_velocity_vector(magnitude=0.5, angle_deg=angle)
+        emitters.append({'mask': mask, 'velocity': vel})
+        
+    elif scenario == 'jet':
+        geo = Sphere(x=10, y=np.random.uniform(30, 60), radius=6)
+        mask = CenteredGrid(geo, extrapolation.BOUNDARY, x=HR_RES, y=HR_RES, bounds=v.bounds)
+        angle = np.random.uniform(-40, 20)
+        vel = get_velocity_vector(magnitude=1.0, angle_deg=angle)
+        buoyancy_factor = (0.0, 0.05)
+        emitters.append({'mask': mask, 'velocity': vel})
+        
+    elif scenario == 'obstacle':
+        geo = Sphere(x=np.random.uniform(30, 70), y=10, radius=np.random.uniform(6, 10))
+        mask = CenteredGrid(geo, extrapolation.BOUNDARY, x=HR_RES, y=HR_RES, bounds=v.bounds)
+        vel = (0, 0.5)
+        emitters.append({'mask': mask, 'velocity': vel})
+        obstacle_geo = Sphere(x=np.random.uniform(40, 60), y=np.random.uniform(40, 60), radius=np.random.uniform(6, 10))
+
+    elif scenario == 'collision':
+        # Emitter 1
+        geo1 = Sphere(x=15, y=np.random.uniform(40, 60), radius=6)
+        mask1 = CenteredGrid(geo1, extrapolation.BOUNDARY, x=HR_RES, y=HR_RES, bounds=v.bounds)
+        angle1 = np.random.uniform(-30, 0)
+        vel1 = get_velocity_vector(magnitude=1.0, angle_deg=angle1)
+        emitters.append({'mask': mask1, 'velocity': vel1})
+
+        # Emitter 2
+        geo2 = Sphere(x=85, y=np.random.uniform(40, 60), radius=6)
+        mask2 = CenteredGrid(geo2, extrapolation.BOUNDARY, x=HR_RES, y=HR_RES, bounds=v.bounds)
+        angle2 = np.random.uniform(180, 210)
+        vel2 = get_velocity_vector(magnitude=1.0, angle_deg=angle2)
+        emitters.append({'mask': mask2, 'velocity': vel2})
+
     hr_frames = []
+    lr_frames = []
 
-    for t in range(FRAMES):
-        # Dynamic Inflow
-        in_s, in_v = get_inflow_for_frame(sim_idx, t)
+    # 4. Main Time Loop
+    for frame in range(FRAMES):
+        current_time = 0.0
         
-        # Physics Step
-        smoke, velocity, pressure = step_function(smoke, velocity, pressure, DT, in_s, in_v)
+        while current_time < DT_FRAME:
+            
+            # Check Maximum Velocity
+            v_centered_check = v.at_centers()
+            v_max = math.max(math.abs(v_centered_check.values))
+            
+            if v_max == 0: v_max = 1e-5
+            safe_dt = 0.8 / float(v_max)
+            dt = min(safe_dt, DT_FRAME - current_time)
+            dt = min(dt, 0.5)
+            
+            # Physics Step A: Advection
+            # Switched to semi_lagrangian for stability (mac_cormack was unstable in collisions)
+            s = advect.mac_cormack(s, v, dt)
+            v = advect.mac_cormack(v, v, dt)
+
+            # Physics Step B: Inflow
+            if frame < injection_cutoff:
+                for em in emitters:
+                    # Add Smoke
+                    s += em['mask'] * 0.2 * dt
+                    
+                    # Add Momentum
+                    # Fix: Resample the scalar mask to the staggered velocity grid
+                    # BEFORE multiplying by the vector. This aligns the shapes.
+                    mask_staggered = resample(em['mask'], to=v)
+                    
+                    # Apply the specific velocity vector for this emitter
+                    v += (mask_staggered * em['velocity']) * dt
+
+            # Physics Step C: Buoyancy
+            buoyancy_force = resample(s, to=v) * buoyancy_factor
+            v += buoyancy_force * dt
+
+            # Physics Step D: Friction
+            v *= 0.995 
+
+            # Physics Step F: Pressure Solve
+            solver_obstacles = [obstacle_geo] if obstacle_geo is not None else []
+            
+            v, p = fluid.make_incompressible(
+                v, 
+                solver_obstacles, 
+                Solve('CG', rel_tol=1e-3, abs_tol=1e-3, x0=p, max_iterations=2000)
+            )
+
+            current_time += dt
+
+        # Data Extraction
+        v_centered = v.at_centers()
+        hr_vel = v_centered.values.numpy('y,x,vector')
         
-        # Store Data
-        v_np = velocity.at_centers().values.numpy('y,x,vector') 
-        hr_frames.append(v_np)
+        h, w, c = hr_vel.shape
+        f = SCALE_FACTOR
+        lr_vel = hr_vel.reshape(h//f, f, w//f, f, c).mean(axis=(1, 3))
 
-    # --- SAVE ---
-    # 1. To Tensor
-    hr_tensor = torch.tensor(np.array(hr_frames), dtype=torch.float32)
-    
-    # 2. Permute (Time, Channels, H, W)
-    hr_tensor = hr_tensor.permute(0, 3, 1, 2)
-    
-    # 3. Stats
-    current_max = torch.max(torch.abs(hr_tensor))
-    if current_max > global_max_val: global_max_val = current_max
-    
-    # 4. AvgPool Downsample (256 -> 32)
-    lr_tensor = F.avg_pool2d(hr_tensor, kernel_size=DS_FACTOR, stride=DS_FACTOR)
-    
-    np.save(f"{DATA_DIR}/{filename}_hr.npy", hr_tensor.numpy())
-    np.save(f"{DATA_DIR}/{filename}_lr.npy", lr_tensor.numpy())
-    
-    print(f" OK (Max={current_max:.2f})")
+        hr_frames.append(hr_vel)
+        lr_frames.append(lr_vel)
+        
+        if frame % 50 == 0:
+            print(f"  Frame {frame}/{FRAMES} | Max Vel: {np.max(np.abs(hr_vel)):.2f}")
 
-print(f"\n✅ DONE! Global Max Velocity: {global_max_val:.6f}")
+    # Saving
+    hr_stack = np.stack(hr_frames)
+    lr_stack = np.stack(lr_frames)
+    
+    save_path = os.path.join(OUTPUT_DIR, f'sim_{sim_id:02d}_{scenario}.npz')
+    np.savez_compressed(save_path, hr=hr_stack, lr=lr_stack)
+    print(f"  Saved {save_path}")
+
+if __name__ == "__main__":
+    for i in range(N_SIMS):
+        try:
+            run_simulation(i)
+        except Exception as e:
+            print(f"  Simulation {i} failed: {e}")
