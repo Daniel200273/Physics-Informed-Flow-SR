@@ -1,10 +1,14 @@
 # Virtual envs and build artifacts
 PIFsr/
 __pycache__/
-*.pyc
-*.npz
+
 # Data files
 data/*.npy
+*.pyc
+*.npz
+*.ptpip
+*.pt
+*.pth
 
 # macOS
 .DS_Store

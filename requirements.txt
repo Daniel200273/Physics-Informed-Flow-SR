@@ -7,3 +7,4 @@ matplotlib
 h5py
 scipy
 phi
+tqdm

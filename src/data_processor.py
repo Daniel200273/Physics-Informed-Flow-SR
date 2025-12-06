@@ -1,76 +1,114 @@
-import torch
-from torch.utils.data import Dataset
-import numpy as np
+import os
 import glob
+import json
+import numpy as np
+import torch
 import torch.nn.functional as F
+from torch.utils.data import Dataset
 
 class FluidDataset(Dataset):
-    def __init__(self, data_dir, global_max, split='train'):
+    def __init__(self, data_dir="../data", stats_file="normalization_stats.json", cache_data=True):
         """
-        data_dir: Path to folder with .npy files
-        global_max: The value printed by your generation script
-        split: 'train' (first 16 sims) or 'val' (last 4 sims)
+        Args:
+            data_dir (str): Path to folder containing .npz files.
+            stats_file (str): Path to the JSON file containing the 'scaling_factor' K.
+            cache_data (bool): If True, loads all sims into RAM for faster access.
         """
-        self.max_val = global_max
+        self.cache_data = cache_data
         
-        # 1. Get List of Files
-        all_hr_files = sorted(glob.glob(f"{data_dir}/*_hr.npy"))
-        all_lr_files = sorted(glob.glob(f"{data_dir}/*_lr.npy"))
+        # 1. Load Normalization Constants
+        if not os.path.exists(stats_file):
+            raise FileNotFoundError(f"Run preprocess_data.py first! Missing {stats_file}")
+            
+        with open(stats_file, 'r') as f:
+            stats = json.load(f)
+        self.K = stats['scaling_factor']
         
-        # 2. Split Logic (Keep simulations intact!)
-        if split == 'train':
-            self.hr_files = all_hr_files[:16] # First 16 simulations
-            self.lr_files = all_lr_files[:16]
-        else:
-            self.hr_files = all_hr_files[16:] # Last 4 simulations
-            self.lr_files = all_lr_files[16:]
-            
-        # 3. Create Index Map
-        # We need a list of every valid (Sim_Index, Frame_Index) tuple
-        self.samples = []
-        for sim_idx, fpath in enumerate(self.hr_files):
-            # Load just to check length (inefficient but safe)
-            # Or assume 200 frames if fixed.
-            data = np.load(fpath) 
-            num_frames = data.shape[0] # Should be 200
-            
-            # We can't use frame 0 (no prev) or frame 199 (no next)
-            for t in range(1, num_frames - 1):
-                self.samples.append((sim_idx, t))
+        # 2. Get File List (All files)
+        self.files = sorted(glob.glob(os.path.join(data_dir, "*.npz")))
+        if len(self.files) == 0:
+            raise ValueError(f"No .npz files found in {data_dir}")
 
-        # Cache data in RAM (If 4000 frames is too big, implement lazy loading)
-        self.cache_hr = [np.load(f) for f in self.hr_files]
-        self.cache_lr = [np.load(f) for f in self.lr_files]
+        # 3. Build Index Map (Flatten the dataset)
+        # We need a list of valid (file_index, frame_index) tuples for the ENTIRE dataset.
+        # Valid frames for target 't' are 1 to N-2 (so t-1 and t+1 exist).
+        self.indices = []
+        self.data_cache = {} # Used if cache_data is True
+        
+        print(f"📦 Loading dataset indices from {len(self.files)} simulations...")
+        
+        for i, fpath in enumerate(self.files):
+            try:
+                # If caching, load data now. If not, just peek at shape.
+                if self.cache_data:
+                    with np.load(fpath) as data:
+                        hr = data['hr'].astype(np.float32)
+                        lr = data['lr'].astype(np.float32)
+                        self.data_cache[i] = (hr, lr)
+                        num_frames = hr.shape[0]
+                else:
+                    with np.load(fpath) as data:
+                        num_frames = data['hr'].shape[0]
+
+                # Create valid indices: Frame 1 to N-2
+                # e.g. if 150 frames (0..149), valid t are 1..148
+                for t in range(1, num_frames - 1):
+                    self.indices.append((i, t))
+                    
+            except Exception as e:
+                print(f"⚠️ Skipping corrupt file {fpath}: {e}")
+        
+        print(f"✅ Dataset ready with {len(self.indices)} total samples.")
 
     def __len__(self):
-        return len(self.samples)
+        return len(self.indices)
 
     def __getitem__(self, idx):
-        sim_id, t = self.samples[idx]
+        file_idx, t = self.indices[idx]
         
-        # A. GET DATA
-        # Shape: (3, 2, 32, 32) -> Frames t-1, t, t+1
-        lr_window_np = self.cache_lr[sim_id][t-1 : t+2]
-        # Shape: (2, 128, 128) -> Frame t only
-        hr_target_np = self.cache_hr[sim_id][t]
+        # A. Load Data
+        if self.cache_data:
+            hr_seq, lr_seq = self.data_cache[file_idx]
+        else:
+            fpath = self.files[file_idx]
+            with np.load(fpath) as data:
+                hr_seq = data['hr']
+                lr_seq = data['lr']
         
-        # Convert to Tensor
-        lr_tensor = torch.from_numpy(lr_window_np).float()
-        hr_tensor = torch.from_numpy(hr_target_np).float()
+        # B. Extract Window
+        # Inputs: Low Res frames [t-1, t, t+1]
+        # Shape in NPZ: (T, H, W, C) -> Slice: (3, 32, 32, 2)
+        lr_window = lr_seq[t-1 : t+2] 
         
-        # B. NORMALIZE
-        lr_tensor = lr_tensor / self.max_val
-        hr_tensor = hr_tensor / self.max_val
+        # Target: High Res frame [t]
+        # Shape in NPZ: (H, W, C) -> (256, 256, 2)
+        hr_target = hr_seq[t]
+
+        # C. Convert to Tensor & Arrange Dimensions
+        # PyTorch expects (Batch, Channel, Height, Width)
+        lr_tensor = torch.from_numpy(lr_window).float() # (3, 32, 32, 2)
+        hr_tensor = torch.from_numpy(hr_target).float() # (256, 256, 2)
         
-        # C. PRE-UPSCALE (The Refinement Step)
-        # We must resize the (3, 2, 32, 32) input to (3, 2, 128, 128)
-        # F.interpolate expects (Batch, Channel, H, W).
-        # We treat "Time" as "Batch" for a moment to resize all 3 frames at once.
-        lr_upscaled = F.interpolate(lr_tensor, scale_factor=4, mode='bilinear', align_corners=False)
+        # Permute to (Time, Channel, H, W) or (Channel, H, W)
+        lr_tensor = lr_tensor.permute(0, 3, 1, 2) # -> (3, 2, 32, 32)
+        hr_tensor = hr_tensor.permute(2, 0, 1)    # -> (2, 256, 256)
+
+        # D. Normalize using Global K
+        lr_tensor = lr_tensor / self.K
+        hr_tensor = hr_tensor / self.K
         
-        # D. FLATTEN CHANNELS
-        # Current shape: (3, 2, 128, 128)
-        # Desired shape: (6, 128, 128)
-        network_input = lr_upscaled.view(-1, 128, 128)
+        # E. Pre-Upscale (Bilinear Interpolation)
+        # Input shape: (3, 2, 32, 32) -> (3, 2, 256, 256)
+        # We treat the first dim (3) as batch for interpolate
+        lr_upscaled = F.interpolate(
+            lr_tensor, 
+            scale_factor=8,  # 32 * 8 = 256
+            mode='bilinear', 
+            align_corners=False
+        ) 
+        
+        # F. Flatten Channels
+        # Merge Time and Channels: (3, 2, 256, 256) -> (6, 256, 256)
+        network_input = lr_upscaled.reshape(-1, 256, 256)
         
         return network_input, hr_tensor

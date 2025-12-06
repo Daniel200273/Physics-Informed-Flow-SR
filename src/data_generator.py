@@ -1,11 +1,12 @@
 import os
+import argparse  # Added for flags
 import numpy as np
 import warnings
 from phi.flow import *
 
 warnings.filterwarnings("ignore", module="phiml.math._optimize")
 
-# --- Configuration ---
+# --- Configuration (Defaults) ---
 N_SIMS = 40
 FRAMES = 150
 HR_RES = 256
@@ -14,8 +15,8 @@ SCALE_FACTOR = HR_RES // LR_RES
 DOMAIN_SIZE = 100
 DT_FRAME = 0.8
 
+# Default output dir (can be overwritten by flag)
 OUTPUT_DIR = '../data'
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def get_velocity_vector(magnitude, angle_deg):
     """Calculates (u, v) vector from magnitude and angle in degrees."""
@@ -49,7 +50,6 @@ def run_simulation(sim_id):
     buoyancy_factor = (buoy_x, buoy_y)
 
     # We store emitter configs in a list to iterate over them
-    # {'mask': Grid, 'velocity': (u, v)}
     emitters = []
     obstacle_geo = None
     
@@ -109,7 +109,6 @@ def run_simulation(sim_id):
             dt = min(dt, 0.5)
             
             # Physics Step A: Advection
-            # Switched to semi_lagrangian for stability (mac_cormack was unstable in collisions)
             s = advect.mac_cormack(s, v, dt)
             v = advect.mac_cormack(v, v, dt)
 
@@ -168,6 +167,21 @@ def run_simulation(sim_id):
     print(f"  Saved {save_path}")
 
 if __name__ == "__main__":
+    # Define Arguments
+    parser = argparse.ArgumentParser(description="Generate fluid simulations.")
+    parser.add_argument("--n_sims", type=int, default=40, help="Number of simulations to generate [default: 40]")
+    parser.add_argument("--output_dir", type=str, default='../data', help="Output directory for .npz files [default: ../data]")
+    
+    args = parser.parse_args()
+    
+    # Update Globals based on flags
+    N_SIMS = args.n_sims
+    OUTPUT_DIR = args.output_dir
+    
+    # Create the directory if it doesn't exist
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    print(f"🚀 Starting generation of {N_SIMS} simulations in '{OUTPUT_DIR}'...")
+    
     for i in range(N_SIMS):
         try:
             run_simulation(i)
