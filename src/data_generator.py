@@ -25,10 +25,16 @@ def get_velocity_vector(magnitude, angle_deg):
     v = magnitude * np.sin(angle_rad)
     return (u, v)
 
-def run_simulation(sim_id):
+def run_simulation(sim_id, n_sims, output_dir):
     """
     Sets up and runs a single fluid simulation scenario.
     """
+    # Update Globals based on flags
+    N_SIMS = n_sims
+    OUTPUT_DIR = output_dir
+    
+    # Create the directory if it doesn't exist
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     scenario = np.random.choice(['plume', 'obstacle', 'jet', 'collision'])
     print(f"--- Generating Sim {sim_id+1}/{N_SIMS} [{scenario}] ---")
@@ -174,16 +180,9 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    # Update Globals based on flags
-    N_SIMS = args.n_sims
-    OUTPUT_DIR = args.output_dir
-    
-    # Create the directory if it doesn't exist
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    print(f"🚀 Starting generation of {N_SIMS} simulations in '{OUTPUT_DIR}'...")
-    
-    for i in range(N_SIMS):
+    print(f"🚀 Starting generation of {args.n_sims} simulations in '{args.output_dir}'...")
+    for i in range(args.n_sims):
         try:
-            run_simulation(i)
+            run_simulation(i, args.n_sims, args.output_dir)
         except Exception as e:
             print(f"  Simulation {i} failed: {e}")

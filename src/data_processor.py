@@ -7,39 +7,43 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 class FluidDataset(Dataset):
-    def __init__(self, data_dir="../data", stats_file="normalization_stats.json", cache_data=True):
+    def __init__(self, data_dir="../data", stats_file="normalization_stats.json", 
+                 target_res=256, noise_std=0.0, cache_data=True):
         """
         Args:
             data_dir (str): Path to folder containing .npz files.
-            stats_file (str): Path to the JSON file containing the 'scaling_factor' K.
-            cache_data (bool): If True, loads all sims into RAM for faster access.
+            stats_file (str): Path to normalization stats JSON.
+            target_res (int): The resolution the network expects (e.g., 256).
+            noise_std (float): Standard deviation of Gaussian noise to add (Augmentation).
+            cache_data (bool): If True, loads all sims into RAM.
         """
         self.cache_data = cache_data
+        self.target_res = target_res
+        self.noise_std = noise_std
         
         # 1. Load Normalization Constants
         if not os.path.exists(stats_file):
-            raise FileNotFoundError(f"Run preprocess_data.py first! Missing {stats_file}")
-            
-        with open(stats_file, 'r') as f:
-            stats = json.load(f)
-        self.K = stats['scaling_factor']
+            print(f"⚠️ Warning: {stats_file} not found. Using default K=1.0")
+            self.K = 1.0
+        else:
+            with open(stats_file, 'r') as f:
+                stats = json.load(f)
+            self.K = float(stats.get('scaling_factor', 1.0))
         
-        # 2. Get File List (All files)
+        # 2. Get File List
         self.files = sorted(glob.glob(os.path.join(data_dir, "*.npz")))
         if len(self.files) == 0:
             raise ValueError(f"No .npz files found in {data_dir}")
 
-        # 3. Build Index Map (Flatten the dataset)
-        # We need a list of valid (file_index, frame_index) tuples for the ENTIRE dataset.
-        # Valid frames for target 't' are 1 to N-2 (so t-1 and t+1 exist).
+        # 3. Build Index Map
         self.indices = []
-        self.data_cache = {} # Used if cache_data is True
+        self.data_cache = {} 
         
-        print(f"📦 Loading dataset indices from {len(self.files)} simulations...")
+        print(f"📦 Loading dataset from {len(self.files)} simulations...")
         
         for i, fpath in enumerate(self.files):
             try:
-                # If caching, load data now. If not, just peek at shape.
+                # Load header/data
                 if self.cache_data:
                     with np.load(fpath) as data:
                         hr = data['hr'].astype(np.float32)
@@ -47,18 +51,19 @@ class FluidDataset(Dataset):
                         self.data_cache[i] = (hr, lr)
                         num_frames = hr.shape[0]
                 else:
+                    # Just peek at shape without loading full data
                     with np.load(fpath) as data:
                         num_frames = data['hr'].shape[0]
 
-                # Create valid indices: Frame 1 to N-2
-                # e.g. if 150 frames (0..149), valid t are 1..148
+                # Create indices for window [t-1, t, t+1]
+                # Valid t range: 1 to N-2
                 for t in range(1, num_frames - 1):
                     self.indices.append((i, t))
                     
             except Exception as e:
-                print(f"⚠️ Skipping corrupt file {fpath}: {e}")
+                print(f"⚠️ Skipping file {fpath}: {e}")
         
-        print(f"✅ Dataset ready with {len(self.indices)} total samples.")
+        print(f"✅ Dataset ready: {len(self.indices)} samples | Target Res: {self.target_res}x{self.target_res}")
 
     def __len__(self):
         return len(self.indices)
@@ -66,7 +71,7 @@ class FluidDataset(Dataset):
     def __getitem__(self, idx):
         file_idx, t = self.indices[idx]
         
-        # A. Load Data
+        # A. Get Data
         if self.cache_data:
             hr_seq, lr_seq = self.data_cache[file_idx]
         else:
@@ -75,40 +80,38 @@ class FluidDataset(Dataset):
                 hr_seq = data['hr']
                 lr_seq = data['lr']
         
-        # B. Extract Window
-        # Inputs: Low Res frames [t-1, t, t+1]
-        # Shape in NPZ: (T, H, W, C) -> Slice: (3, 32, 32, 2)
-        lr_window = lr_seq[t-1 : t+2] 
-        
-        # Target: High Res frame [t]
-        # Shape in NPZ: (H, W, C) -> (256, 256, 2)
-        hr_target = hr_seq[t]
+        # B. Extract Window [t-1, t, t+1]
+        # lr_seq shape: (Time, H, W, C)
+        lr_window = lr_seq[t-1 : t+2]  # (3, H_in, W_in, 2)
+        hr_target = hr_seq[t]          # (256, 256, 2)
 
-        # C. Convert to Tensor & Arrange Dimensions
-        # PyTorch expects (Batch, Channel, Height, Width)
-        lr_tensor = torch.from_numpy(lr_window).float() # (3, 32, 32, 2)
-        hr_tensor = torch.from_numpy(hr_target).float() # (256, 256, 2)
-        
-        # Permute to (Time, Channel, H, W) or (Channel, H, W)
-        lr_tensor = lr_tensor.permute(0, 3, 1, 2) # -> (3, 2, 32, 32)
-        hr_tensor = hr_tensor.permute(2, 0, 1)    # -> (2, 256, 256)
+        # C. To Tensor & Permute
+        # (3, H, W, 2) -> (3, 2, H, W)
+        lr_tensor = torch.from_numpy(lr_window).permute(0, 3, 1, 2).float()
+        # (H, W, 2) -> (2, H, W)
+        hr_tensor = torch.from_numpy(hr_target).permute(2, 0, 1).float()
 
-        # D. Normalize using Global K
+        # D. Normalize
         lr_tensor = lr_tensor / self.K
         hr_tensor = hr_tensor / self.K
         
-        # E. Pre-Upscale (Bilinear Interpolation)
-        # Input shape: (3, 2, 32, 32) -> (3, 2, 256, 256)
-        # We treat the first dim (3) as batch for interpolate
-        lr_upscaled = F.interpolate(
-            lr_tensor, 
-            scale_factor=8,  # 32 * 8 = 256
-            mode='bilinear', 
-            align_corners=False
-        ) 
-        
-        # F. Flatten Channels
-        # Merge Time and Channels: (3, 2, 256, 256) -> (6, 256, 256)
-        network_input = lr_upscaled.reshape(-1, 256, 256)
+        # E. Dynamic Upscaling
+        # Automatically detects input size and upscales to target_res (256)
+        if lr_tensor.shape[-1] != self.target_res:
+            lr_tensor = F.interpolate(
+                lr_tensor, 
+                size=(self.target_res, self.target_res), 
+                mode='bilinear', 
+                align_corners=False
+            )
+            
+        # F. Noise Augmentation (Only if enabled)
+        if self.noise_std > 0:
+            noise = torch.randn_like(lr_tensor) * self.noise_std
+            lr_tensor += noise
+
+        # G. Flatten Channels for Network
+        # (3, 2, 256, 256) -> (6, 256, 256)
+        network_input = lr_tensor.reshape(-1, self.target_res, self.target_res)
         
         return network_input, hr_tensor
