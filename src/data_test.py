@@ -12,7 +12,7 @@ from data_processor import FluidDataset
 from model import ResUNet
 
 # --- Configuration ---
-MODEL_PATH = "checkpoints/PINN_epoch_50.pth" 
+MODEL_PATH = "checkpoints/PINN_best.pth" 
 STATS_FILE = "normalization_stats.json"      
 TEST_DATA_DIR = "../data_test"               
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -71,7 +71,19 @@ def run_inference():
         print(f"❌ Model file not found at {MODEL_PATH}")
         return
 
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+    # --- FIX START ---
+    # Load the checkpoint dictionary
+    checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
+    
+    # Check if it's a full checkpoint (dict) or just weights
+    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        print("   > Loaded full checkpoint (extracting weights)...")
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        print("   > Loaded weight-only checkpoint...")
+        model.load_state_dict(checkpoint)
+    # --- FIX END ---
+
     model.eval()
 
     # 4. Inference Loop
@@ -79,8 +91,8 @@ def run_inference():
     
     predictions = []
     ground_truths = []
-    inputs_lr_bilinear = [] # The upscaled input the model sees
-    inputs_lr_raw = []      # The actual 32x32 pixels
+    inputs_lr_bilinear = [] 
+    inputs_lr_raw = []      
     
     inference_start = time.perf_counter()
 
@@ -100,13 +112,14 @@ def run_inference():
             ground_truths.append(hr_np[0])
             
             # Extract Middle Frame (channels 2-3)
-            # lr_np is already upscaled to 256x256 by FluidDataset
             mid_frame_bilinear = lr_np[0, 2:4, :, :]
             inputs_lr_bilinear.append(mid_frame_bilinear)
             
-            # Recover Raw 32x32 by slicing (stride 8)
-            # Since FluidDataset used F.interpolate(scale=8), we can just sample every 8th pixel
-            mid_frame_raw = mid_frame_bilinear[:, ::8, ::8]
+            # Recover Raw 32x32 by slicing (stride 8) if original was 32
+            # Or stride 4 if original was 64. Adjust stride based on your generator settings.
+            # Assuming 8x downscaling for now based on previous code.
+            scale_factor = 256 // 32 
+            mid_frame_raw = mid_frame_bilinear[:, ::scale_factor, ::scale_factor]
             inputs_lr_raw.append(mid_frame_raw)
 
     inference_end = time.perf_counter()
@@ -146,17 +159,17 @@ def visualize_results(raw_list, bilinear_list, sr_list, hr_list, K, gen_time, in
     ax_raw, ax_bi, ax_sr, ax_hr = axes
 
     # Placeholders
-    # Raw is 32x32
+    # Raw is smaller
     im_raw = ax_raw.imshow(np.zeros((32, 32)), cmap='inferno', vmin=0, vmax=max_val, origin='lower', interpolation='nearest')
-    # Others are 256x256
+    
     dummy_hr = np.zeros((256, 256))
     im_bi = ax_bi.imshow(dummy_hr, cmap='inferno', vmin=0, vmax=max_val, origin='lower')
     im_sr = ax_sr.imshow(dummy_hr, cmap='inferno', vmin=0, vmax=max_val, origin='lower')
     im_hr = ax_hr.imshow(dummy_hr, cmap='inferno', vmin=0, vmax=max_val, origin='lower')
 
     # Titles and Formatting (Padded to avoid overlap)
-    ax_raw.set_title("Input (32x32)\nNative Resolution", fontsize=12, pad=15)
-    ax_bi.set_title("Rough Upscaling (256x256)\nBilinear Interpolation", fontsize=12, pad=15)
+    ax_raw.set_title("Input (Native)\nNearest Neighbor", fontsize=12, pad=15)
+    ax_bi.set_title("Upscaled Input\nBilinear Interpolation", fontsize=12, pad=15)
     ax_sr.set_title(f"ResUNet Super-Res\n(Inference: {infer_time:.2f}s)", fontsize=12, color='darkblue', fontweight='bold', pad=15)
     ax_hr.set_title(f"Ground Truth High-Res\n(Sim Time: {gen_time:.2f}s)", fontsize=12, pad=15)
 

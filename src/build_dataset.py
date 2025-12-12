@@ -88,3 +88,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     build_and_save(args.data_dir, args.stats, args.out, args.target_res)
+    
