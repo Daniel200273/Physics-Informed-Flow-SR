@@ -1,205 +1,191 @@
 import os
 import torch
 import time
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from torch.utils.data import DataLoader
+import shutil
 
 # --- Import your modules ---
-import data_generator_test as generator 
+# Ensure this matches your local filename for the generator
+import generate_dataset_flexible as generator 
 from data_processor import FluidDataset   
-from model import ResUNet
+from model import ResUNet # Import model definition from your notebook or file
 
 # --- Configuration ---
-MODEL_PATH = "checkpoints/PINN_best.pth" 
+MODEL_PATH = "checkpoints/PINN_NS_best_3.pth" 
 STATS_FILE = "normalization_stats.json"      
 TEST_DATA_DIR = "../data_test"               
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def generate_test_data():
-    """Generates 1 new simulation for testing and tracks time."""
+    """Generates 1 new simulation for testing and SAVES it."""
     print(f"⚙️  Generating test simulation in {TEST_DATA_DIR}...")
     
-    # 1. Clean up old data
-    if not os.path.exists(TEST_DATA_DIR):
-        os.makedirs(TEST_DATA_DIR)
-    for f in os.listdir(TEST_DATA_DIR):
-        if f.endswith('.npz'):
-            os.remove(os.path.join(TEST_DATA_DIR, f))
-
-    # 2. Run Generation & Time it
-    start_time = time.perf_counter()
-    try:
-        # Pass (sim_id, n_sims, output_dir)
-        generator.run_simulation(0, 1, TEST_DATA_DIR)
-    except Exception as e:
-        print(f"❌ Generation failed: {e}")
-        exit()
-    end_time = time.perf_counter()
+    # 1. Clean Directory
+    if os.path.exists(TEST_DATA_DIR):
+        shutil.rmtree(TEST_DATA_DIR)
+    os.makedirs(TEST_DATA_DIR)
     
-    total_gen_time = end_time - start_time
-    print(f"✅ Simulation generated in {total_gen_time:.2f} seconds.")
+    # 2. Run Generation (Native 64x64)
+    # capture the data!
+    sim_data, scenario = generator.run_simulation(0, 1, TEST_DATA_DIR, 64, int(time.time()))
     
-    return total_gen_time
+    # 3. SAVE THE DATA (This was missing!)
+    save_path = os.path.join(TEST_DATA_DIR, "test_sim.npz")
+    # Save as both LR and HR (since we just need input for testing)
+    np.savez_compressed(save_path, hr=sim_data, lr=sim_data)
+    
+    print(f"✅ Simulation generated and saved to {save_path}.")
 
 def run_inference():
-    # 1. Generate Data & Measure Time
-    gen_time = generate_test_data()
+    # 1. Generate Fresh Data
+    generate_test_data()
 
-    # 2. Load Data
-    print("⏳ Loading test dataset...")
-    try:
-        test_dataset = FluidDataset(
-            data_dir=TEST_DATA_DIR, 
-            stats_file=STATS_FILE, 
-            cache_data=True
-        )
-    except FileNotFoundError as e:
-        print(f"❌ Error: {e}")
-        return
+    # 2. Load Data using Processor
+    # This handles the loading, normalizing, and upscaling for us
+    dataset = FluidDataset(
+        data_dir=TEST_DATA_DIR, 
+        stats_file=STATS_FILE, 
+        target_res=256,
+        cache_data=True
+    )
     
-    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
-    K = test_dataset.K
-    print(f"   > Scaling Factor K: {K}")
-
+    loader = DataLoader(dataset, batch_size=1, shuffle=False)
+    
     # 3. Load Model
     print(f"🧠 Loading model from {MODEL_PATH}...")
-    model = ResUNet(in_channels=6, out_channels=2).to(DEVICE)
+    model = ResUNet(in_channels=4, out_channels=4).to(DEVICE)
     
-    if not os.path.exists(MODEL_PATH):
-        print(f"❌ Model file not found at {MODEL_PATH}")
-        return
-
-    # --- FIX START ---
-    # Load the checkpoint dictionary
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
-    
-    # Check if it's a full checkpoint (dict) or just weights
     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-        print("   > Loaded full checkpoint (extracting weights)...")
         model.load_state_dict(checkpoint['model_state_dict'])
     else:
-        print("   > Loaded weight-only checkpoint...")
         model.load_state_dict(checkpoint)
-    # --- FIX END ---
-
+        
     model.eval()
 
-    # 4. Inference Loop
+    # 4. Inference
     print("🚀 Running Inference...")
     
-    predictions = []
-    ground_truths = []
-    inputs_lr_bilinear = [] 
-    inputs_lr_raw = []      
-    
-    inference_start = time.perf_counter()
+    results = {
+        'lr_input': [],
+        'sr_pred': [],
+        'hr_target': []
+    }
 
     with torch.no_grad():
-        for i, (lr_input, hr_target) in enumerate(test_loader):
-            lr_input = lr_input.to(DEVICE)
+        for lr, hr in loader:
+            lr = lr.to(DEVICE)
             
-            # Forward Pass (SR)
-            sr_output = model(lr_input)
+            # Predict
+            sr = model(lr)
             
-            # Move to CPU
-            sr_np = sr_output.cpu().numpy()     
-            hr_np = hr_target.cpu().numpy()     
-            lr_np = lr_input.cpu().numpy()      
-
-            predictions.append(sr_np[0])
-            ground_truths.append(hr_np[0])
+            # Move to CPU and un-normalize
+            # We need to manually un-normalize using the dataset's stored K values
+            # shape: (1, 4, H, W)
+            lr_np = lr.cpu().numpy()[0]
+            sr_np = sr.cpu().numpy()[0]
+            hr_np = hr.cpu().numpy()[0]
             
-            # Extract Middle Frame (channels 2-3)
-            mid_frame_bilinear = lr_np[0, 2:4, :, :]
-            inputs_lr_bilinear.append(mid_frame_bilinear)
+            # Un-normalize Channels (u,v / K_vel), (p / K_pres), (s / K_smoke)
+            for arr in [lr_np, sr_np, hr_np]:
+                arr[0:2] *= dataset.K_vel
+                arr[2]   *= dataset.K_pres
+                arr[3]   *= dataset.K_smoke
             
-            # Recover Raw 32x32 by slicing (stride 8) if original was 32
-            # Or stride 4 if original was 64. Adjust stride based on your generator settings.
-            # Assuming 8x downscaling for now based on previous code.
-            scale_factor = 256 // 32 
-            mid_frame_raw = mid_frame_bilinear[:, ::scale_factor, ::scale_factor]
-            inputs_lr_raw.append(mid_frame_raw)
+            results['lr_input'].append(lr_np)
+            results['sr_pred'].append(sr_np)
+            results['hr_target'].append(hr_np)
 
-    inference_end = time.perf_counter()
-    inference_time = inference_end - inference_start
+    # 5. Visualize
+    print("🎬 Creating Physics Comparison GIF...")
+    create_physics_animation(results)
+
+def create_physics_animation(results):
+    # Unpack lists
+    # Each element is (4, H, W). Stack to (Time, 4, H, W)
+    lr = np.stack(results['lr_input'])
+    sr = np.stack(results['sr_pred'])
+    hr = np.stack(results['hr_target'])
     
-    avg_inference_fps = len(predictions) / inference_time
+    frames = lr.shape[0]
     
-    print(f"⏱️  Performance Stats:")
-    print(f"   > Generation (HR+LR Physics): {gen_time:.4f} s")
-    print(f"   > SR Inference (Neural Net):  {inference_time:.4f} s")
-    print(f"   > Inference Speed:            {avg_inference_fps:.1f} FPS")
-
-    # 5. Create Animation
-    print("🎬 Creating GIF...")
-    visualize_results(inputs_lr_raw, inputs_lr_bilinear, predictions, ground_truths, K, gen_time, inference_time)
-
-def visualize_results(raw_list, bilinear_list, sr_list, hr_list, K, gen_time, infer_time):
-    """
-    Creates a 4-panel comparison GIF.
-    """
-    frames = len(sr_list)
+    # Extract quantities
+    # Velocity Magnitude
+    def get_vel(x): return np.sqrt(x[:, 0]**2 + x[:, 1]**2)
+    vel_lr, vel_sr, vel_hr = get_vel(lr), get_vel(sr), get_vel(hr)
     
-    # Helper to calculate velocity magnitude
-    def get_mag(u_vec):
-        u = u_vec[0] * K
-        v = u_vec[1] * K
-        return np.sqrt(u**2 + v**2)
-
-    # Determine global max for consistent colors
-    max_val = 0
-    for item in hr_list:
-        max_val = max(max_val, np.max(get_mag(item)))
-    if max_val == 0: max_val = 1.0
-
-    # Setup Plot (4 columns now)
-    fig, axes = plt.subplots(1, 4, figsize=(22, 6))
-    ax_raw, ax_bi, ax_sr, ax_hr = axes
-
-    # Placeholders
-    # Raw is smaller
-    im_raw = ax_raw.imshow(np.zeros((32, 32)), cmap='inferno', vmin=0, vmax=max_val, origin='lower', interpolation='nearest')
+    # Pressure
+    pres_lr, pres_sr, pres_hr = lr[:, 2], sr[:, 2], hr[:, 2]
     
-    dummy_hr = np.zeros((256, 256))
-    im_bi = ax_bi.imshow(dummy_hr, cmap='inferno', vmin=0, vmax=max_val, origin='lower')
-    im_sr = ax_sr.imshow(dummy_hr, cmap='inferno', vmin=0, vmax=max_val, origin='lower')
-    im_hr = ax_hr.imshow(dummy_hr, cmap='inferno', vmin=0, vmax=max_val, origin='lower')
+    # Smoke
+    smoke_lr, smoke_sr, smoke_hr = lr[:, 3], sr[:, 3], hr[:, 3]
 
-    # Titles and Formatting (Padded to avoid overlap)
-    ax_raw.set_title("Input (Native)\nNearest Neighbor", fontsize=12, pad=15)
-    ax_bi.set_title("Upscaled Input\nBilinear Interpolation", fontsize=12, pad=15)
-    ax_sr.set_title(f"ResUNet Super-Res\n(Inference: {infer_time:.2f}s)", fontsize=12, color='darkblue', fontweight='bold', pad=15)
-    ax_hr.set_title(f"Ground Truth High-Res\n(Sim Time: {gen_time:.2f}s)", fontsize=12, pad=15)
+    # Global Max/Min for consistent colors
+    v_max = max(np.max(vel_lr), np.max(vel_sr), np.max(vel_hr))
+    p_max = max(np.max(np.abs(pres_lr)), np.max(np.abs(pres_sr)), np.max(np.abs(pres_hr)))
+    s_max = max(np.max(smoke_lr), np.max(smoke_sr), np.max(smoke_hr))
 
-    for ax in axes:
-        ax.axis('off')
+    # --- Plotting (3 Rows x 3 Cols) ---
+    fig, axes = plt.subplots(3, 3, figsize=(15, 12))
+    plt.subplots_adjust(wspace=0.1, hspace=0.2)
+    
+    # Columns: Input (LR), Prediction (SR), Ground Truth (HR)
+    # Rows: Velocity, Pressure, Smoke
+    
+    # Row 1: Velocity
+    ax_v = axes[0]
+    im_v_lr = ax_v[0].imshow(vel_lr[0], vmin=0, vmax=v_max, cmap='inferno', origin='lower')
+    im_v_sr = ax_v[1].imshow(vel_sr[0], vmin=0, vmax=v_max, cmap='inferno', origin='lower')
+    im_v_hr = ax_v[2].imshow(vel_hr[0], vmin=0, vmax=v_max, cmap='inferno', origin='lower')
+    
+    ax_v[0].set_title("Input (Upscaled)", fontweight='bold')
+    ax_v[1].set_title("SR Prediction", fontweight='bold', color='blue')
+    ax_v[2].set_title("Ground Truth", fontweight='bold')
+    ax_v[0].set_ylabel("Velocity", fontsize=12)
 
-    # Add Colorbar
-    cbar_ax = fig.add_axes([0.92, 0.15, 0.01, 0.7]) # x, y, width, height
-    fig.colorbar(im_hr, cax=cbar_ax, label='Velocity Magnitude (m/s)')
+    # Row 2: Pressure
+    ax_p = axes[1]
+    im_p_lr = ax_p[0].imshow(pres_lr[0], vmin=-p_max, vmax=p_max, cmap='RdBu', origin='lower')
+    im_p_sr = ax_p[1].imshow(pres_sr[0], vmin=-p_max, vmax=p_max, cmap='RdBu', origin='lower')
+    im_p_hr = ax_p[2].imshow(pres_hr[0], vmin=-p_max, vmax=p_max, cmap='RdBu', origin='lower')
+    ax_p[0].set_ylabel("Pressure", fontsize=12)
 
-    # Add Frame Counter
-    fig.text(0.02, 0.95, "Fluid Super-Resolution Comparison", fontsize=16, fontweight='bold')
-    txt_frame = fig.text(0.5, 0.95, "", fontsize=14, ha='center', color='gray')
+    # Row 3: Smoke
+    ax_s = axes[2]
+    im_s_lr = ax_s[0].imshow(smoke_lr[0], vmin=0, vmax=s_max, cmap='magma', origin='lower')
+    im_s_sr = ax_s[1].imshow(smoke_sr[0], vmin=0, vmax=s_max, cmap='magma', origin='lower')
+    im_s_hr = ax_s[2].imshow(smoke_hr[0], vmin=0, vmax=s_max, cmap='magma', origin='lower')
+    ax_s[0].set_ylabel("Smoke Density", fontsize=12)
 
-    # Adjust layout to prevent overlap
-    plt.subplots_adjust(top=0.80, bottom=0.05, left=0.02, right=0.90, wspace=0.1)
+    for ax in axes.flat:
+        ax.set_xticks([])
+        ax.set_yticks([])
 
-    def update(frame_idx):
-        im_raw.set_data(get_mag(raw_list[frame_idx]))
-        im_bi.set_data(get_mag(bilinear_list[frame_idx]))
-        im_sr.set_data(get_mag(sr_list[frame_idx]))
-        im_hr.set_data(get_mag(hr_list[frame_idx]))
-        txt_frame.set_text(f"Frame {frame_idx}/{frames}")
-        return im_raw, im_bi, im_sr, im_hr
+    # Animation
+    def update(f):
+        # Velocity
+        im_v_lr.set_data(vel_lr[f])
+        im_v_sr.set_data(vel_sr[f])
+        im_v_hr.set_data(vel_hr[f])
+        # Pressure
+        im_p_lr.set_data(pres_lr[f])
+        im_p_sr.set_data(pres_sr[f])
+        im_p_hr.set_data(pres_hr[f])
+        # Smoke
+        im_s_lr.set_data(smoke_lr[f])
+        im_s_sr.set_data(smoke_sr[f])
+        im_s_hr.set_data(smoke_hr[f])
+        return [im_v_lr, im_v_sr, im_v_hr, im_p_lr, im_p_sr, im_p_hr, im_s_lr, im_s_sr, im_s_hr]
 
     ani = animation.FuncAnimation(fig, update, frames=frames, interval=50, blit=False)
     
-    save_path = "inference_result_4panel.gif"
-    ani.save(save_path, writer='pillow', fps=20)
-    print(f"✨ Animation saved to {save_path}")
+    out_path = "inference_physics_test.gif"
+    ani.save(out_path, writer='pillow', fps=20)
+    print(f"✨ Animation saved to {out_path}")
 
 if __name__ == "__main__":
     run_inference()

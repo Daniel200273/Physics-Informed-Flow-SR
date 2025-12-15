@@ -5,21 +5,24 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-def calculate_magnitude(velocity_field):
+def unpack_physics(data_seq):
     """
-    Computes the magnitude of the velocity vectors.
-    Input shape: (Frames, Height, Width, 2)
-    Output shape: (Frames, Height, Width)
+    Unpacks (Frames, H, W, 4) -> Velocity Mag, Pressure, Smoke
     """
-    # u_x is index 0, u_y is index 1
-    u_x = velocity_field[..., 0]
-    u_y = velocity_field[..., 1]
-    return np.sqrt(u_x**2 + u_y**2)
+    # 1. Velocity Magnitude (Channels 0, 1)
+    u = data_seq[..., 0]
+    v = data_seq[..., 1]
+    vel_mag = np.sqrt(u**2 + v**2)
+    
+    # 2. Pressure (Channel 2)
+    pressure = data_seq[..., 2]
+    
+    # 3. Smoke (Channel 3)
+    smoke = data_seq[..., 3]
+    
+    return vel_mag, pressure, smoke
 
 def play_simulation(file_path, save_gif=False, auto_advance=True):
-    """
-    Loads an NPZ file and animates the HR and LR side-by-side.
-    """
     print(f"Loading {file_path}...")
     
     try:
@@ -27,102 +30,123 @@ def play_simulation(file_path, save_gif=False, auto_advance=True):
             if 'hr' not in data or 'lr' not in data:
                 print(f"Skipping {file_path}: Keys 'hr' and 'lr' not found.")
                 return
-
             hr_seq = data['hr']
             lr_seq = data['lr']
-            
     except Exception as e:
         print(f"Error reading {file_path}: {e}")
         return
 
-    # Check dimensions
     frames = hr_seq.shape[0]
     print(f"  Data found: {frames} frames.")
     
-    # Compute Magnitude
-    hr_mag = calculate_magnitude(hr_seq)
-    lr_mag = calculate_magnitude(lr_seq)
+    # Unpack Data
+    hr_vel, hr_pres, hr_smoke = unpack_physics(hr_seq)
+    lr_vel, lr_pres, lr_smoke = unpack_physics(lr_seq)
 
-    # Determine Color Scale
-    valid_max = max(np.max(hr_mag), np.max(lr_mag))
-    if valid_max == 0: valid_max = 1.0 
+    # Determine Global Max for consistent colors
+    # Velocity
+    v_max = max(np.max(hr_vel), np.max(lr_vel))
+    if v_max == 0: v_max = 1.0
     
-    vmin = 0
-    vmax = valid_max
+    # Pressure (Centered around 0 usually, so use symmetric range)
+    p_abs = max(np.max(np.abs(hr_pres)), np.max(np.abs(lr_pres)))
+    if p_abs == 0: p_abs = 1.0
+    
+    # Smoke (Usually 0 to 1)
+    s_max = max(np.max(hr_smoke), np.max(lr_smoke))
+    if s_max == 0: s_max = 1.0
 
-    # --- Setup Plot ---
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
-    fig.canvas.manager.set_window_title(f"Visualizing: {os.path.basename(file_path)}")
+    # --- Setup Plot (2 Rows x 3 Cols) ---
+    fig, axes = plt.subplots(2, 3, figsize=(16, 8))
+    fig.canvas.manager.set_window_title(f"Physics Vis: {os.path.basename(file_path)}")
+    
+    # Row 1: High Res
+    ax_hr_v, ax_hr_p, ax_hr_s = axes[0]
+    # Row 2: Low Res
+    ax_lr_v, ax_lr_p, ax_lr_s = axes[1]
 
-    # High Res Plot
-    img_hr = ax1.imshow(hr_mag[0], cmap='inferno', vmin=vmin, vmax=vmax, origin='lower')
-    ax1.set_title(f"High Res ({hr_seq.shape[1]}x{hr_seq.shape[2]})")
-    ax1.axis('off')
+    # --- Initial Images ---
+    
+    # Velocity (Inferno)
+    img_hr_v = ax_hr_v.imshow(hr_vel[0], cmap='inferno', vmin=0, vmax=v_max, origin='lower')
+    img_lr_v = ax_lr_v.imshow(lr_vel[0], cmap='inferno', vmin=0, vmax=v_max, origin='lower', interpolation='nearest')
+    ax_hr_v.set_title(f"HR Velocity ({hr_seq.shape[1]}x{hr_seq.shape[2]})")
+    ax_lr_v.set_title(f"LR Velocity ({lr_seq.shape[1]}x{lr_seq.shape[2]})")
 
-    # Low Res Plot
-    img_lr = ax2.imshow(lr_mag[0], cmap='inferno', vmin=vmin, vmax=vmax, origin='lower', interpolation='nearest')
-    ax2.set_title(f"Low Res ({lr_seq.shape[1]}x{lr_seq.shape[2]})")
-    ax2.axis('off')
+    # Pressure (RdBu - Diverging)
+    img_hr_p = ax_hr_p.imshow(hr_pres[0], cmap='RdBu', vmin=-p_abs, vmax=p_abs, origin='lower')
+    img_lr_p = ax_lr_p.imshow(lr_pres[0], cmap='RdBu', vmin=-p_abs, vmax=p_abs, origin='lower', interpolation='nearest')
+    ax_hr_p.set_title("HR Pressure")
+    ax_lr_p.set_title("LR Pressure")
 
-    # Add Frame Counter
-    time_text = ax1.text(0.02, 0.95, '', transform=ax1.transAxes, color='white', 
-                         fontsize=12, fontweight='bold')
+    # Smoke (Magma)
+    img_hr_s = ax_hr_s.imshow(hr_smoke[0], cmap='magma', vmin=0, vmax=s_max, origin='lower')
+    img_lr_s = ax_lr_s.imshow(lr_smoke[0], cmap='magma', vmin=0, vmax=s_max, origin='lower', interpolation='nearest')
+    ax_hr_s.set_title("HR Smoke Density")
+    ax_lr_s.set_title("LR Smoke Density")
+
+    # Hide Axes
+    for ax in axes.flat:
+        ax.axis('off')
+
+    # Frame Text
+    time_text = ax_hr_v.text(0.02, 0.95, '', transform=ax_hr_v.transAxes, color='white', 
+                             fontsize=12, fontweight='bold', bbox=dict(facecolor='black', alpha=0.5))
 
     def update(frame):
-        img_hr.set_data(hr_mag[frame])
-        img_lr.set_data(lr_mag[frame])
+        # Velocity
+        img_hr_v.set_data(hr_vel[frame])
+        img_lr_v.set_data(lr_vel[frame])
+        
+        # Pressure
+        img_hr_p.set_data(hr_pres[frame])
+        img_lr_p.set_data(lr_pres[frame])
+        
+        # Smoke
+        img_hr_s.set_data(hr_smoke[frame])
+        img_lr_s.set_data(lr_smoke[frame])
+        
         time_text.set_text(f"Frame: {frame}/{frames}")
-        return img_hr, img_lr, time_text
+        return img_hr_v, img_lr_v, img_hr_p, img_lr_p, img_hr_s, img_lr_s, time_text
 
-    # Animation Settings
     interval_ms = 50
-    
-    # If auto-advancing, don't loop the video (repeat=False) so it ends cleanly
     should_loop = not auto_advance
     
     ani = animation.FuncAnimation(
-        fig, update, frames=frames, interval=interval_ms, blit=True, repeat=should_loop
+        fig, update, frames=frames, interval=interval_ms, blit=False, repeat=should_loop
     )
 
+    plt.tight_layout()
+
     if save_gif:
-        out_name = file_path.replace('.npz', '.gif')
+        out_name = file_path.replace('.npz', '_physics.gif')
         print(f"  Saving animation to {out_name}...")
         ani.save(out_name, writer='pillow', fps=20)
         print("  Done.")
         plt.close(fig)
     else:
         if auto_advance:
-            # Calculate duration in seconds + a small buffer (1.0s)
             duration = (frames * interval_ms / 1000.0) + 1.0
             print(f"  Playing for {duration:.1f} seconds...")
-            
-            # Non-blocking show
             plt.show(block=False)
-            
-            # Pause allows the GUI event loop to run for 'duration' seconds
             try:
                 plt.pause(duration)
             except Exception:
-                pass # Handle case where user closes window manually during playback
-            
-            # Close the window to allow the main loop to proceed
+                pass
             plt.close(fig)
         else:
-            print("  Displaying... (Close window to continue to next file)")
+            print("  Displaying... (Close window to continue)")
             plt.show()
 
 def main():
-    parser = argparse.ArgumentParser(description="Visualize fluid simulation .npz files.")
+    parser = argparse.ArgumentParser(description="Visualize 4-channel fluid simulation (Vel, Pres, Smoke).")
     parser.add_argument('path', nargs='?', default='../data', 
-                        help="Path to a directory containing .npz files or a specific .npz file.")
-    parser.add_argument('--save', action='store_true', 
-                        help="Save the animation as a .gif file instead of showing it.")
-    parser.add_argument('--manual', action='store_true',
-                        help="Disable auto-advance. Wait for user to close window before playing next file.")
+                        help="Path to .npz file or directory.")
+    parser.add_argument('--save', action='store_true', help="Save .gif instead of showing.")
+    parser.add_argument('--manual', action='store_true', help="Disable auto-advance.")
     
     args = parser.parse_args()
 
-    # Determine files to process
     files = []
     if os.path.isfile(args.path):
         files = [args.path]
@@ -136,8 +160,6 @@ def main():
         return
 
     print(f"Found {len(files)} files.")
-    
-    # Default is auto-advance unless --manual is passed
     auto_advance = not args.manual
     
     for f in files:

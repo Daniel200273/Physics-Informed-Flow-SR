@@ -1,4 +1,9 @@
 {
-    "global_max_velocity": 5.292877197265625,
-    "scaling_factor": 6.0
+    "scaling_factor": 6.0,
+    "K_vel": 6.0,
+    "K_pres": 2.0,
+    "K_smoke": 9.0,
+    "raw_max_vel": 5.028463363647461,
+    "raw_max_pres": 1.7437740564346313,
+    "raw_max_smoke": 8.195897102355957
 }
