@@ -9,6 +9,6 @@ data/*.npy
 *.ptpip
 *.pt
 *.pth
-
+src/*.gif
 # macOS
 .DS_Store
