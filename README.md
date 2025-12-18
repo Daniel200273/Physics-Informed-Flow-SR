@@ -31,8 +31,8 @@ We employ a **U-Net** architecture enhanced with **Residual Blocks**. This struc
 
 We train two distinct variations of the model to quantify the impact of physics constraints:
 
-1.  **Baseline Res-U-Net:** Trained purely on data loss (MSE between predicted and ground truth pixels).
-2.  **Physics-Informed Res-U-Net:** Trained with a composite loss function: **MSE + Physics Loss**. The physics loss calculates the divergence of the generated field ($\nabla \cdot \mathbf{u}$) and penalizes non-zero values, enforcing the physical law of conservation of mass.
+1. **Baseline Res-U-Net:** Trained purely on data loss (MSE between predicted and ground truth pixels).
+2. **Physics-Informed Res-U-Net:** Trained with a composite loss function: **MSE + Physics Loss**. The physics loss calculates the divergence of the generated field ($\nabla \cdot \mathbf{u}$) and penalizes non-zero values, enforcing the physical law of conservation of mass.
 
 ---
 
@@ -45,9 +45,9 @@ We train two distinct variations of the model to quantify the impact of physics 
 
 ## 🚀 Get Started
 
-1.  Clone the repository: `git clone [REPO_URL]`
-2.  Install dependencies: `pip install -r requirements.txt`
-3.  Run the data generator: `cd src & python generate_dataset.py`
+1. Clone the repository: `git clone [REPO_URL]`
+2. Install dependencies: `pip install -r requirements.txt`
+3. Run the data generator: `cd src & python generate_dataset.py`
 
 <br/>
 <div align="center">

@@ -12,7 +12,7 @@ from data_processor import FluidDataset
 from model import ResUNet
 
 # --- Configuration ---
-MODEL_PATH = "checkpoints/Baseline_best.pth"
+MODEL_PATH = "checkpoints/PINN_best(3).pth"
 STATS_FILE = "normalization_stats.json"
 TEST_DATA_DIR = "../data_test"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
