@@ -13,12 +13,12 @@ class FluidDataset(Dataset):
         Args:
             data_dir (str): Path to folder containing .npz files.
             stats_file (str): Path to normalization stats JSON.
-            target_res (int): The resolution the network expects (e.g., 256).
+            target_res (int): Kept for compatibility but unused for interpolation.
             noise_std (float): Standard deviation of Gaussian noise (Augmentation).
             cache_data (bool): If True, loads all sims into RAM for speed.
         """
         self.cache_data = cache_data
-        self.target_res = target_res
+        self.target_res = target_res 
         self.noise_std = noise_std
         
         # 1. Load Normalization Constants (Velocity, Pressure, Smoke)
@@ -61,14 +61,13 @@ class FluidDataset(Dataset):
                         num_frames = data['hr'].shape[0]
 
                 # Create indices for Single Frame [t]
-                # We skip the very first/last frames to be safe, though not strictly needed for single-frame
                 for t in range(0, num_frames):
                     self.indices.append((i, t))
                     
             except Exception as e:
                 print(f"⚠️ Skipping file {fpath}: {e}")
         
-        print(f"✅ Dataset ready: {len(self.indices)} samples | Target Res: {self.target_res}x{self.target_res}")
+        print(f"✅ Dataset ready: {len(self.indices)} samples.")
         print(f"   Normalization: K_v={self.K_vel}, K_p={self.K_pres}, K_s={self.K_smoke}")
 
     def __len__(self):
@@ -115,14 +114,8 @@ class FluidDataset(Dataset):
         lr_tensor = self.normalize_channels(lr_tensor)
         hr_tensor = self.normalize_channels(hr_tensor)
         
-        # E. Dynamic Upscaling (if input is Low Res)
-        if lr_tensor.shape[-1] != self.target_res:
-            lr_tensor = F.interpolate(
-                lr_tensor.unsqueeze(0), # Add batch dim for interpolate: (1, 4, H, W)
-                size=(self.target_res, self.target_res), 
-                mode='bilinear', 
-                align_corners=False
-            ).squeeze(0) # Remove batch dim: (4, 256, 256)
+        # E. NO Upscaling (Removed)
+        # We return the native resolution. The Generator will handle upscaling.
             
         # F. Noise Augmentation (Only if enabled)
         if self.noise_std > 0:
@@ -130,6 +123,6 @@ class FluidDataset(Dataset):
             lr_tensor += noise
 
         # G. Return Tensors
-        # Input: (4, 256, 256) -> [u, v, p, s]
+        # Input: (4, 64, 64) -> [u, v, p, s]
         # Target: (4, 256, 256) -> [u, v, p, s]
         return lr_tensor, hr_tensor

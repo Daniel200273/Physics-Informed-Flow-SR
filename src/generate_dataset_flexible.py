@@ -41,39 +41,64 @@ def run_simulation(sim_id, n_sims, output_dir, resolution, scenario_seed):
     max_inj = int(FRAMES * 0.50)
     injection_cutoff = np.random.randint(min_inj, max_inj)
     
-    buoy_y = np.random.uniform(0.2, 0.5) 
-    buoy_x = np.random.uniform(-0.1, 0.1) 
+    # Buoyancy randomization
+    buoy_y = np.random.uniform(0.2, 0.6) 
+    buoy_x = np.random.uniform(-0.15, 0.15) # Increased lateral jitter 
     buoyancy_factor = (buoy_x, buoy_y)
 
     emitters = []
     obstacle_geo = None
     
-    # --- SCENARIO SETUP ---
+    # --- SCENARIO SETUP (Enhanced Randomness) ---
     if scenario == 'plume':
-        geo = Sphere(x=np.random.uniform(30, 70), y=10, radius=6)
-        angle = np.random.uniform(50, 130)
-        vel = get_velocity_vector(0.5, angle)
-        emitters.append({'geo': geo, 'velocity': vel})
+        geo = Sphere(x=np.random.uniform(20, 80), y=10, radius=np.random.uniform(5, 7))
+        # MODIFIED: Wider angles (20 to 160 degrees) for more tilt
+        angle = np.random.uniform(20, 160) 
+        # MODIFIED: Randomized injection velocity (Weak vs Strong source)
+        vel_mag = np.random.uniform(0.3, 0.8)
+        vel = get_velocity_vector(vel_mag, angle)
+        # MODIFIED: Randomized smoke intensity
+        intensity = np.random.uniform(0.15, 0.5)
+        emitters.append({'geo': geo, 'velocity': vel, 'intensity': intensity})
+
     elif scenario == 'jet':
-        geo = Sphere(x=10, y=np.random.uniform(30, 60), radius=6)
-        angle = np.random.uniform(-40, 20)
-        vel = get_velocity_vector(1.0, angle)
-        buoyancy_factor = (0.0, 0.05)
-        emitters.append({'geo': geo, 'velocity': vel})
+        geo = Sphere(x=10, y=np.random.uniform(20, 80), radius=np.random.uniform(4, 6))
+        # MODIFIED: Wider jet angles (-50 to 50)
+        angle = np.random.uniform(-50, 50)
+        # Jets are usually faster
+        vel_mag = np.random.uniform(0.8, 1.5)
+        vel = get_velocity_vector(vel_mag, angle)
+        # Jets have less buoyancy, more momentum
+        buoyancy_factor = (0.0, np.random.uniform(0.0, 0.1))
+        intensity = np.random.uniform(0.3, 0.7)
+        emitters.append({'geo': geo, 'velocity': vel, 'intensity': intensity})
+
     elif scenario == 'obstacle':
         geo = Sphere(x=np.random.uniform(30, 70), y=10, radius=6)
-        vel = (0, 0.5)
-        emitters.append({'geo': geo, 'velocity': vel})
-        obstacle_geo = Sphere(x=np.random.uniform(40, 60), y=np.random.uniform(40, 60), radius=np.random.uniform(6, 10))
+        vel_mag = np.random.uniform(0.4, 0.7)
+        vel = (0, vel_mag)
+        intensity = np.random.uniform(0.2, 0.4)
+        emitters.append({'geo': geo, 'velocity': vel, 'intensity': intensity})
+        
+        # Obstacle randomization
+        obs_x = np.random.uniform(30, 70)
+        obs_y = np.random.uniform(40, 70)
+        obstacle_geo = Sphere(x=obs_x, y=obs_y, radius=np.random.uniform(5, 12))
+
     elif scenario == 'collision':
-        geo1 = Sphere(x=15, y=np.random.uniform(40, 60), radius=6)
-        angle1 = np.random.uniform(-30, 0)
-        vel1 = get_velocity_vector(1.0, angle1)
-        emitters.append({'geo': geo1, 'velocity': vel1})
-        geo2 = Sphere(x=85, y=np.random.uniform(40, 60), radius=6)
-        angle2 = np.random.uniform(180, 210)
-        vel2 = get_velocity_vector(1.0, angle2)
-        emitters.append({'geo': geo2, 'velocity': vel2})
+        # Emitter 1
+        geo1 = Sphere(x=15, y=np.random.uniform(30, 70), radius=6)
+        angle1 = np.random.uniform(-45, 10)
+        vel1 = get_velocity_vector(np.random.uniform(0.8, 1.2), angle1)
+        intensity1 = np.random.uniform(0.3, 0.6)
+        emitters.append({'geo': geo1, 'velocity': vel1, 'intensity': intensity1})
+        
+        # Emitter 2 (Opposing)
+        geo2 = Sphere(x=85, y=np.random.uniform(30, 70), radius=6)
+        angle2 = np.random.uniform(170, 225)
+        vel2 = get_velocity_vector(np.random.uniform(0.8, 1.2), angle2)
+        intensity2 = np.random.uniform(0.3, 0.6)
+        emitters.append({'geo': geo2, 'velocity': vel2, 'intensity': intensity2})
 
     frames_data = []
     
@@ -89,7 +114,7 @@ def run_simulation(sim_id, n_sims, output_dir, resolution, scenario_seed):
             
             # CFL condition
             cell_size = DOMAIN_SIZE / resolution
-            safe_dt = (0.8 * cell_size) / float(v_max)
+            safe_dt = (0.5 * cell_size) / float(v_max)
             dt = min(safe_dt, DT_FRAME - current_time, 0.5)
             
             # --- PHYSICS ---
@@ -99,7 +124,10 @@ def run_simulation(sim_id, n_sims, output_dir, resolution, scenario_seed):
             if frame < injection_cutoff:
                 for em in emitters:
                     mask_s = CenteredGrid(em['geo'], s.extrapolation, bounds=s.bounds, resolution=s.resolution)
-                    s += mask_s * 0.2 * dt
+                    # MODIFIED: Use the specific intensity for this emitter
+                    val = em.get('intensity', 0.2) 
+                    s += mask_s * val * dt
+                    
                     mask_v = resample(mask_s, to=v)
                     v += (mask_v * em['velocity']) * dt
 

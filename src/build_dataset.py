@@ -24,8 +24,7 @@ def build_and_save(data_dir, stats_file, output_file, target_res):
         print(f"⚠️ Warning: {e}")
 
     # 2. Instantiate Dataset
-    print(f"\nStep 2: Loading Raw Data map...")
-    # We use cache_data=False to save RAM. We only need the file list for now.
+    print(f"\nStep 2: Analyzing Dataset...")
     dataset = FluidDataset(
         data_dir=data_dir, 
         stats_file=stats_file, 
@@ -35,29 +34,34 @@ def build_and_save(data_dir, stats_file, output_file, target_res):
     )
     
     num_samples = len(dataset)
+    
+    # --- CRITICAL FIX: Peek at the first sample to get real dimensions ---
+    # We cannot assume input is target_res (256). It is likely 64.
+    sample_lr, sample_hr = dataset[0]
+    input_h, input_w = sample_lr.shape[-2], sample_lr.shape[-1]
+    target_h, target_w = sample_hr.shape[-2], sample_hr.shape[-1]
+    
     print(f"   > Found {num_samples} samples.")
+    print(f"   > Detected Input Shape:  {input_h}x{input_w}")
+    print(f"   > Detected Target Shape: {target_h}x{target_w}")
     
-    # 3. Pre-allocate Memory (The Fix)
-    # Instead of a list, we create the final Float16 tensor immediately.
-    # This reserves exactly ~6GB RAM and never spikes higher.
-    print(f"\nStep 3: Allocating Memory for {num_samples} samples...")
+    # 3. Pre-allocate Memory
+    print(f"\nStep 3: Allocating Memory...")
     
-    # Shape: (N, 4, 256, 256)
-    final_inputs = torch.empty((num_samples, 4, target_res, target_res), dtype=torch.float16)
-    final_targets = torch.empty((num_samples, 4, 256, 256), dtype=torch.float16)
+    # Allocate using the DETECTED shapes, not hardcoded args
+    final_inputs = torch.empty((num_samples, 4, input_h, input_w), dtype=torch.float16)
+    final_targets = torch.empty((num_samples, 4, target_h, target_w), dtype=torch.float16)
     
-    # 4. Fill Tensors Incrementally
+    # 4. Fill Tensors
     print(f"Step 4: Processing and Filling Tensors...")
     
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=4)
     
     for i, (lr_frame, hr_frame) in enumerate(tqdm(loader, desc="Building")):
-        # lr_frame is (1, 4, 256, 256) -> squeeze to (4, 256, 256)
-        # We convert to half() IMMEDIATELY before storing
         final_inputs[i] = lr_frame.squeeze(0).half()
         final_targets[i] = hr_frame.squeeze(0).half()
         
-    print(f"   > Final Input Shape:  {final_inputs.shape} (Float16)")
+    print(f"   > Final Input Tensor:  {final_inputs.shape}")
     
     # 5. Save to Disk
     print(f"\nStep 5: Saving to {output_file}...")
@@ -76,7 +80,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default="../data", help="Folder containing raw .npz files")
     parser.add_argument("--out", type=str, default="../dataset/processed_dataset.pt", help="Path to save the output .pt file")
     parser.add_argument("--stats", type=str, default="normalization_stats.json", help="Path to normalization stats json")
-    parser.add_argument("--target_res", type=int, default=256, help="Target resolution")
+    parser.add_argument("--target_res", type=int, default=256, help="Target resolution (HR)")
     
     args = parser.parse_args()
     

@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
+
 def unpack_physics(data_seq):
     """
     Unpacks (Frames, H, W, 4) -> Velocity Mag, Pressure, Smoke

@@ -1,9 +1,9 @@
 {
-    "scaling_factor": 6.0,
-    "K_vel": 6.0,
-    "K_pres": 2.0,
-    "K_smoke": 9.0,
-    "raw_max_vel": 5.028463363647461,
-    "raw_max_pres": 1.7437740564346313,
-    "raw_max_smoke": 8.195897102355957
+    "scaling_factor": 9.0,
+    "K_vel": 9.0,
+    "K_pres": 3.0,
+    "K_smoke": 18.0,
+    "raw_max_vel": 8.032172203063965,
+    "raw_max_pres": 2.0826005935668945,
+    "raw_max_smoke": 17.055551528930664
 }
