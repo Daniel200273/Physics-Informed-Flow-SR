@@ -10,5 +10,6 @@ data/*.npy
 *.pt
 *.pth
 src/*.gif
+gifs/*
 # macOS
 .DS_Store
