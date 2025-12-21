@@ -214,7 +214,7 @@ def visualize_results(raw_list, bilinear_list, sr_list, hr_list, K, gen_time, in
     ani = animation.FuncAnimation(
         fig, update, frames=frames, interval=50, blit=False)
 
-    save_path = "inference_result_4panel.gif"
+    save_path = "inference_result_4panel_new_new.gif"
     ani.save(save_path, writer='pillow', fps=20)
     print(f"✨ Animation saved to {save_path}")
 

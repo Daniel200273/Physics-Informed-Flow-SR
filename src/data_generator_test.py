@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore", module="phiml.math._optimize")
 # --- Configuration ---
 FRAMES = 150
 HR_RES = 256
-LR_RES = 64
+LR_RES = 32
 DOMAIN_SIZE = 100
 DT_FRAME = 0.8
 
