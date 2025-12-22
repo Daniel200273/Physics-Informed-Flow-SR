@@ -39,7 +39,7 @@ class FluidDataset(Dataset):
         self.indices = []
         self.data_cache = {} 
         
-        print(f"📦 Loading dataset from {len(self.files)} simulations...")
+        print(f" Loading dataset from {len(self.files)} simulations...")
         
         for i, fpath in enumerate(self.files):
             try:
@@ -61,9 +61,9 @@ class FluidDataset(Dataset):
                     self.indices.append((i, t))
                     
             except Exception as e:
-                print(f"⚠️ Skipping file {fpath}: {e}")
+                print(f" Warning: Skipping file {fpath}: {e}")
         
-        print(f"✅ Dataset ready: {len(self.indices)} samples | Target Res: {self.target_res}x{self.target_res}")
+        print(f" Dataset ready: {len(self.indices)} samples | Target Res: {self.target_res}x{self.target_res}")
 
     def __len__(self):
         return len(self.indices)

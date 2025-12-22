@@ -20,7 +20,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def generate_test_data():
     """Generates 1 new simulation for testing and tracks time."""
-    print(f"⚙️  Generating test simulation in {TEST_DATA_DIR}...")
+    print(f"  Generating test simulation in {TEST_DATA_DIR}...")
 
     # 1. Clean up old data
     if not os.path.exists(TEST_DATA_DIR):
@@ -66,7 +66,7 @@ def run_inference():
     print(f"   > Scaling Factor K: {K}")
 
     # 3. Load Model
-    print(f"🧠 Loading model from {MODEL_PATH}...")
+    print(f" Loading model from {MODEL_PATH}...")
     model = ResUNet(in_channels=6, out_channels=2).to(DEVICE)
 
     if not os.path.exists(MODEL_PATH):
@@ -137,7 +137,7 @@ def run_inference():
     print(f"   > Inference Speed:            {avg_inference_fps:.1f} FPS")
 
     # 5. Create Animation
-    print("🎬 Creating GIF...")
+    print(" Creating GIF...")
     visualize_results(inputs_lr_raw, inputs_lr_bilinear,
                       predictions, ground_truths, K, gen_time, inference_time)
 
@@ -216,7 +216,7 @@ def visualize_results(raw_list, bilinear_list, sr_list, hr_list, K, gen_time, in
 
     save_path = "inference_gifs/inference_result_4panel_new_new.gif"
     ani.save(save_path, writer='pillow', fps=20)
-    print(f"✨ Animation saved to {save_path}")
+    print(f" Animation saved to {save_path}")
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from data_processor import FluidDataset
 from k_finder import calculate_global_max
 
 def build_and_save(data_dir, stats_file, output_file, target_res):
-    print(f"🏗️  STARTING DATASET BUILD PIPELINE")
+    print(f"  STARTING DATASET BUILD PIPELINE")
     print(f"   > Input:  {data_dir}")
     print(f"   > Output: {output_file}")
     print(f"   > Target Resolution: {target_res}x{target_res}")
@@ -23,7 +23,7 @@ def build_and_save(data_dir, stats_file, output_file, target_res):
     try:
         calculate_global_max(data_dir=data_dir, output_file=stats_file)
     except Exception as e:
-        print(f"⚠️ Warning during K calculation: {e}")
+        print(f" Warning during K calculation: {e}")
         print("   If normalization_stats.json already exists, we will use it.")
     
     # 2. Instantiate Dataset
@@ -40,7 +40,7 @@ def build_and_save(data_dir, stats_file, output_file, target_res):
         )
     except TypeError:
         # Fallback if FluidDataset hasn't been updated with target_res yet
-        print("⚠️ Warning: FluidDataset does not accept target_res/noise_std. Using legacy init.")
+        print(" Warning: FluidDataset does not accept target_res/noise_std. Using legacy init.")
         dataset = FluidDataset(data_dir=data_dir, stats_file=stats_file)
 
     print(f"   > Loaded {len(dataset)} total samples.")
@@ -74,7 +74,7 @@ def build_and_save(data_dir, stats_file, output_file, target_res):
         'K': dataset.K
     }, output_file)
     
-    print("✅ Dataset built and saved successfully.")
+    print(" Dataset built and saved successfully.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build processed .pt dataset from .npz files.")

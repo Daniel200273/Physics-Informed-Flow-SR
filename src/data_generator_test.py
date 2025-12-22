@@ -209,8 +209,8 @@ def run_simulation(sim_id, n_sims, output_dir):
     # ---------------------------------------------------------
     # 5. Finalize
     # ---------------------------------------------------------
-    print(f"  ⏱️  HR Generation Time: {total_time_hr:.2f}s")
-    print(f"  ⏱️  LR Generation Time: {total_time_lr:.2f}s")
+    print(f"   HR Generation Time: {total_time_hr:.2f}s")
+    print(f"   LR Generation Time: {total_time_lr:.2f}s")
     
     hr_stack = np.stack(hr_frames)
     lr_stack = np.stack(lr_frames)
@@ -227,7 +227,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     os.makedirs(args.output_dir, exist_ok=True)
-    print(f"🚀 Generating {args.n_sims} simulations in '{args.output_dir}'...")
+    print(f" Generating {args.n_sims} simulations in '{args.output_dir}'...")
     
     for i in range(args.n_sims):
         try:
