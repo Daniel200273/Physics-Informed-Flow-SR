@@ -23,16 +23,18 @@ To capture flow dynamics and temporal coherence, the model does not look at a si
 - **Output:** A single **High-Res frame** at time $t$.
   This allows the network to infer velocity direction and acceleration from the low-resolution context.
 
-### 3. Model Architecture: Residual U-Net
+### 3. Model Architecture: SRGAN
 
-We employ a **U-Net** architecture enhanced with **Residual Blocks**. This structure allows for deep feature extraction while preserving spatial information through skip connections, which is critical for resolving fine turbulent structures.
+We adapted the **Super-Resolution <generative Adversarial Network** to reconstruct high-fidelity fluid simulations from low-resolution (64x64) inputs. 
 
-### 4. Experimental Comparison
+### 4. Training Strategy
 
-We train two distinct variations of the model to quantify the impact of physics constraints:
-
-1.  **Baseline Res-U-Net:** Trained purely on data loss (MSE between predicted and ground truth pixels).
-2.  **Physics-Informed Res-U-Net:** Trained with a composite loss function: **MSE + Physics Loss**. The physics loss calculates the divergence of the generated field ($\nabla \cdot \mathbf{u}$) and penalizes non-zero values, enforcing the physical law of conservation of mass.
+1.  **Pre-training:** We first train the Generator in isolation
+using Mean Squared Error (MSE) loss. This phase ini-
+tializes the upscaling filters and stabilizes the model be-
+fore introducing adversarial complexity.
+2.  **Fine-tuning:** We then train the full GAN (Generator +
+Discriminator) using a composite loss function. This stage introduces the **adversarial loss**  to recover high-frequency turbulent details and a **physics-informed loss**  to enforce fluid constraints.
 
 ---
 
@@ -45,7 +47,7 @@ We train two distinct variations of the model to quantify the impact of physics 
 
 ## 🚀 Get Started
 
-1.  Clone the repository: `git clone [REPO_URL]`
+1.  Clone the repository: `git clone https://github.com/Daniel200273/Physics-Informed-Flow-SR`
 2.  Install dependencies: `pip install -r requirements.txt`
 3.  Run the data generator: `cd src & python generate_dataset.py`
 
