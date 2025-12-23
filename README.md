@@ -45,7 +45,7 @@ We train two distinct variations of the model to quantify the impact of physics 
 
 ## 🚀 Get Started
 
-1. Clone the repository: `git clone [REPO_URL]`
+1. Clone the repository: `git clone https://github.com/Daniel200273/Physics-Informed-Flow-SR`
 2. Install dependencies: `pip install -r requirements.txt`
 3. Run the data generator: `cd src & python generate_dataset.py`
 
