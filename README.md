@@ -1,53 +1,35 @@
 # 🌊 Physics-Informed Super-Resolution for Fluid Dynamics
 
-## ⚡ Project Overview
+**Bridging the gap between coarse simulations and high-fidelity reality using Deep Learning.**
 
-This project demonstrates the use of Deep Learning to **accelerate Computational Fluid Dynamics (CFD)** simulations. We train a Neural Network to perform **Super-Resolution (SR)** on low-fidelity fluid velocity fields, bypassing the need for computationally expensive numerical solvers at high resolutions. The core innovation is integrating **Physics Constraints** into the training process.
+## 🚀 Project Overview and Goal
+Simulating high-resolution fluid dynamics is computationally expensive. This project explores a **Deep Learning approach to Super-Resolution (SR)**, enabling the reconstruction of fine-grained turbulent details from low-resolution, "blocky" inputs.
 
-## 🔄 Project Pipeline & Methodology
-
-Our approach follows a strict pipeline from physics-based data generation to comparative model training:
-
-### 1. Synthetic Data Generation
-
-We utilize **PhiFlow** (a differentiable physics engine) to create ground-truth fluid simulations.
-
-- **High-Resolution (Target):** $256 \times 256$ velocity fields ($u_x, u_y$).
-- **Low-Resolution (Input):** $32 \times 32$ fields, created by **Average Pooling** the high-res simulation. This mimics sensor integration and ensures the input physically represents a coarse average of the fine grid.
-
-### 2. Temporal Data Processing
-
-To capture flow dynamics and temporal coherence, the model does not look at a single frame in isolation.
-
-- **Input:** A tensor stack of **3 consecutive Low-Res frames** ($t-1$, $t$, $t+1$).
-- **Output:** A single **High-Res frame** at time $t$.
-  This allows the network to infer velocity direction and acceleration from the low-resolution context.
-
-### 3. Model Architecture: Residual U-Net
-
-We employ a **U-Net** architecture enhanced with **Residual Blocks**. This structure allows for deep feature extraction while preserving spatial information through skip connections, which is critical for resolving fine turbulent structures.
-
-### 4. Experimental Comparison
-
-We train two distinct variations of the model to quantify the impact of physics constraints:
-
-1. **Baseline Res-U-Net:** Trained purely on data loss (MSE between predicted and ground truth pixels).
-2. **Physics-Informed Res-U-Net:** Trained with a composite loss function: **MSE + Physics Loss**. The physics loss calculates the divergence of the generated field ($\nabla \cdot \mathbf{u}$) and penalizes non-zero values, enforcing the physical law of conservation of mass.
+**Our Goal:**
+To develop a model that doesn't just "upscale" images, but **understands physics**. By integrating **Navier-Stokes constraints** directly into the loss function, we ensure that our generated high-resolution fields ($256 \times 256$) are not only visually sharp but physically valid divergence-free flows.
 
 ---
 
-## 🎯 The Core Problem & Goal
+## 🛠️ Project Pipeline & Methodology
 
-| Problem                                                          | Goal                                                                                     |
-| :--------------------------------------------------------------- | :--------------------------------------------------------------------------------------- |
-| Traditional solvers take **seconds/minutes** per high-res frame. | Achieve **significant inference speedup** (milliseconds per frame) via a neural network. |
-| Standard AI (MSE) outputs **unphysical, blurry** flow.           | Enforce **Navier-Stokes** laws to ensure outputs are physically valid and sharp.         |
+Our pipeline treats fluid simulation as a "Sim-to-Real" problem. We generate data using the **PhiFlow** toolkit, creating pairs of **Low-Res ($64^2$)** inputs and **High-Res ($256^2$)** ground truth targets across 4 physical channels: *Velocity (u, v), Pressure (p), and Smoke Density (s).*
 
-## 🚀 Get Started
+We investigated two distinct architectural approaches to solve this challenge:
 
-1. Clone the repository: `git clone https://github.com/Daniel200273/Physics-Informed-Flow-SR`
-2. Install dependencies: `pip install -r requirements.txt`
-3. Run the data generator: `cd src & python generate_dataset.py`
+### 1. ResUNet
+* **Input:** Stack of 3 consecutive frames `[t-1, t, t+1]` to capture temporal flow dynamics.
+* **Architecture:** A **Residual U-Net** with deep encoder-decoder paths and skip connections.
+* **Focus:** Smoothness and temporal consistency. The model takes pre-upsampled coarse inputs and refines them to match the target.
+
+### 2. SRGAN
+* **Input:** Single-frame physics fields (4 channels).
+* **Architecture:** A **Super-Resolution GAN** composed of:
+    * **Generator:** Modified SRResNet (16 Residual Blocks, PReLU) for 4x spatial upsampling.
+    * **Discriminator:** VGG-style network to differentiate real vs. generated turbulence.
+* **Physics-Informed Training:**
+    * **Phase 1 (Pre-training):** Supervised learning on mathematically downscaled inputs.
+    * **Phase 2 (Fine-tuning):** Finetuning with a dataset where inputs are generated natively at low resolution (64x64)
+
 
 <br/>
 <div align="center">
